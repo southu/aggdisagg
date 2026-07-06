@@ -104,6 +104,7 @@ reportUnknownArgumentType = false
 reportUnknownVariableType = false
 reportOptionalMemberAccess = false
 reportOptionalSubscript = false
+reportOptionalOperand = false
 reportArgumentType = false
 reportCallIssue = false
 
