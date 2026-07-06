@@ -37,8 +37,13 @@ class AggDisaggResult:
 
     def check_consistency(self, tol: float = 1e-10) -> bool:
         """Verify that aggregation of result recovers the low-frequency input."""
-        reagg = self.aggregate().to_numpy()
-        return np.allclose(reagg, self._low_values, atol=tol)
+        if self._low_values is None:
+            return True
+        try:
+            reagg = self.aggregate().to_numpy()
+            return np.allclose(reagg, self._low_values, atol=tol)
+        except Exception:
+            return False
 
 
 class AggDisaggModel:

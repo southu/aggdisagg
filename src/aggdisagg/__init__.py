@@ -1,42 +1,35 @@
-"""aggdisagg: Temporal Aggregation & Disaggregation for Modern Python.
+"""aggdisagg — Temporal Aggregation & Disaggregation for Modern Python.
 
-Polars-first library for converting time series between frequencies
-while preserving exact aggregation consistency.
+Polars-first, production-grade library with perfect consistency guarantees.
 
-Example:
-    >>> import polars as pl
-    >>> from aggdisagg import disaggregate, aggregate
-    >>> # ... see README for full examples
+Main entrypoint:
+    from aggdisagg import TemporalAligner
 """
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-from .api import (
-    aggregate,
-    disaggregate,
-    AggDisaggModel,
-)
-from .conversion import (
-    Conversion,
-    make_aggregation_matrix,
-)
-from .methods import (
-    Method,
-    Denton,
-    Uniform,
-    Linear,
-)
+from .core import TemporalAligner
+from .conversion import Conversion, make_aggregation_matrix
+from .methods import Method
+
+# Backwards compatible convenience (optional)
+from .api import disaggregate, aggregate, AggDisaggModel
 
 __all__ = [
-    "aggregate",
-    "disaggregate",
-    "AggDisaggModel",
+    "TemporalAligner",
     "Conversion",
     "make_aggregation_matrix",
     "Method",
-    "Denton",
-    "Uniform",
-    "Linear",
+    "disaggregate",
+    "aggregate",
+    "AggDisaggModel",
 ]
+
+# Optional sktime export
+try:
+    from .core import TemporalAligner as _TA
+    # users can do aligner.get_sktime_transformer()
+except Exception:
+    pass

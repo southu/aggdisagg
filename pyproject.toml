@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aggdisagg"
-version = "0.1.0"
+version = "0.2.0"
 description = "Temporal Aggregation & Disaggregation for Modern Python"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "Your Name", email = "you@example.com"},
+    {name = "aggdisagg Contributors"},
 ]
 keywords = [
     "time-series",
@@ -22,10 +22,11 @@ keywords = [
     "econometrics",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -33,6 +34,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "polars>=1.0.0",
@@ -45,21 +47,23 @@ pandas = ["pandas>=2.0.0"]
 xarray = ["xarray>=2023.0.0"]
 plot = ["plotly>=5.0.0"]
 sklearn = ["scikit-learn>=1.3.0"]
+sktime = ["sktime>=0.25.0"]
+statsforecast = ["statsforecast>=1.5.0"]
 all = [
-    "aggdisagg[pandas,xarray,plot,sklearn]",
+    "aggdisagg[pandas,xarray,plot,sklearn,sktime,statsforecast]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/aggdisagg"
+Homepage = "https://github.com/aggdisagg/aggdisagg"
+Repository = "https://github.com/aggdisagg/aggdisagg"
+Issues = "https://github.com/aggdisagg/aggdisagg/issues"
 Documentation = "https://aggdisagg.readthedocs.io"
-Repository = "https://github.com/yourusername/aggdisagg"
-Issues = "https://github.com/yourusername/aggdisagg/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aggdisagg"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ruff>=0.4.0",
     "pyright>=1.1.360",
     "pytest>=8.0.0",
@@ -71,6 +75,8 @@ dev-dependencies = [
     "xarray>=2023.0.0",
     "plotly>=5.0.0",
     "scikit-learn>=1.3.0",
+    "sktime>=0.25.0",
+    "statsforecast>=1.5.0",
 ]
 
 [tool.ruff]

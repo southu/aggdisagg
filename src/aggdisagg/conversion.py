@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import Enum
 from typing import Literal
 
 import numpy as np
 import polars as pl
 
-class Conversion(StrEnum):
+class Conversion(str, Enum):
     """How low-frequency values relate to high-frequency observations."""
 
     SUM = "sum"

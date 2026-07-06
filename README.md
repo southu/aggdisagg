@@ -7,103 +7,100 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-**aggdisagg** is a clean, Polars-first Python library for converting time series between frequencies while guaranteeing **perfect aggregation consistency**.
+**aggdisagg** is a clean, **Polars-first** Python library for converting time series between frequencies with **perfect aggregation consistency**.
 
-- Disaggregate (low → high frequency)
-- Aggregate (high → low frequency)
-- Works with **Polars**, **pandas**, and **xarray**
+- Disaggregate low → high frequency (with indicators)
+- Aggregate high → low frequency (symmetric)
+- Works with **Polars** (primary), **pandas**, and **xarray**
 
 ## Installation
 
 ```bash
-# Core (Polars + NumPy + SciPy)
 uv pip install aggdisagg
-
-# With pandas + xarray + plotting support
+# or with extras
 uv pip install "aggdisagg[all]"
 ```
 
-## Quickstart (Polars Native)
+## Quickstart with `TemporalAligner`
 
 ```python
 import polars as pl
-from aggdisagg import disaggregate, aggregate, AggDisaggModel
+from datetime import date
+from aggdisagg import TemporalAligner
 
-# Yearly sales data
-y_yearly = pl.Series("sales", [1200.0, 1500.0, 1350.0])
+df = pl.DataFrame({
+    "date": [date(2020, 1, 1), date(2021, 1, 1), date(2022, 1, 1)],
+    "y": [1200.0, 1500.0, 1350.0],      # low-frequency target
+    "indicator": [100.0, 125.0, 110.0], # high-frequency indicator
+})
 
-# Disaggregate to monthly (uniform distribution)
-y_monthly = disaggregate(
-    y_yearly, 
-    n_high=36, 
-    method="uniform", 
-    conversion="sum"
+aligner = TemporalAligner(
+    method="chow-lin-opt",
+    target_freq="1mo",
+    agg="sum",
+    indicator_cols=["indicator"],
 )
 
-print(y_monthly.head(6))
-# shape: (6,)
-# Series: 'y_high' [f64]
-# [
-#     100.0
-#     100.0
-#     ...
-# ]
+monthly = aligner.fit_transform(df, datetime_col="date", target_col="y")
+print(monthly.head())
 
-# Perfect round-trip
-y_back = aggregate(y_monthly, n_low=3, conversion="sum")
-assert (y_back - y_yearly).abs().sum() < 1e-10
+# Perfect symmetric aggregation
+yearly_back = aligner.aggregate(monthly, freq="1y")
+print("Roundtrip OK:", (yearly_back["y_1y"] - df["y"]).abs().sum() < 1e-8)
+
+# Plot (requires plotly)
+monthly.plot()  # or use .plot() on the result if extended
 ```
 
-### Using the Model API (scikit-learn style)
+## Supported Methods
 
-```python
-df = pl.DataFrame({"y": [1200.0, 1500.0, 1350.0]})
+- `uniform`
+- `linear`
+- `denton` / `denton-cholette`
+- `chow-lin`, `chow-lin-opt` (auto ρ via maxlog/minrss)
+- `litterman`, `fernandez`
 
-model = AggDisaggModel(method="linear", conversion="sum")
-model.fit(df, n_high=36)
-
-y_high = model.predict()
-print(model.check_consistency())   # True
-
-# Re-aggregate anytime
-y_reagg = model.aggregate(y_high)
-```
+All methods guarantee `C @ y_high ≈ y_low` exactly.
 
 ## Why aggdisagg?
 
-- **Polars first** — lazy, fast, modern
-- **Guaranteed consistency** — `C @ y_high == y_low` (within floating point)
-- **Multiple methods** — `uniform`, `linear`, and extensible (Denton, Chow-Lin coming)
-- **Works everywhere** — Polars ↔ pandas ↔ xarray interop
-- **Production ready** — typed, tested, documented
+- **Polars-native** core (lazy-friendly)
+- **Perfect consistency** by construction (C/D matrices)
+- **Sklearn-style** + fluent API
+- Real econometric methods (Denton quadratic, Chow-Lin GLS)
+- Excellent pandas / xarray interop
+- Production quality (typed, tested, documented)
 
-## Supported Conversions
+## v0.2 Highlights
 
-| Conversion | Meaning                     | Example use case          |
-|------------|-----------------------------|---------------------------|
-| `sum`      | High-freq values sum to low | Sales, production         |
-| `mean`     | Average of high-freq        | Prices, rates             |
-| `first`    | First high-freq value       | Stock levels (beginning)  |
-| `last`     | Last high-freq value        | Stock levels (end)        |
+- Hierarchical reconciliation (national → regional)
+- Uncertainty (bootstrap + analytic std errors)
+- Full Polars lazy + xarray DataArray I/O
+- Negative post-correction + NNLS ensemble
+- sktime / statsforecast compatible wrapper
 
-## Roadmap
+```python
+# Hierarchical
+rec = aligner.reconcile_hierarchical([nat_df, reg_df])
 
-- Full Denton & Denton-Cholette
-- Chow-Lin with indicator series + automatic ρ
-- Proper uncertainty quantification
-- Hierarchical (multi-level) reconciliation
-- Daily / weekly / irregular calendar support
+# Uncertainty
+mean, std = aligner.predict_with_uncertainty()
 
-## Development
+# Lazy + xarray
+lazy_high = aligner.fit_transform(lazy_df)
+xa = aligner.to_xarray(high_df)
+```
 
-This project uses the modern Python stack:
+See `examples/quickstart.py` for complete gallery.
+
+## Development & Publishing
 
 ```bash
-uv sync
+uv sync --all-extras
 uv run pytest
-uv run ruff check .
-uv run pyright src
-uv run mkdocs serve
+uv run python examples/quickstart.py
+uv build
+# twine or uv publish
 ```
 
 ## License

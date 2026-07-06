@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 import numpy as np
 import polars as pl
 
-from .conversion import Conversion, make_aggregation_matrix
+from .conversion import Conversion
 
 
-class Method(StrEnum):
+class Method(str, Enum):
     """Available methods for temporal conversion."""
 
     UNIFORM = "uniform"
