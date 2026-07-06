@@ -368,7 +368,7 @@ def test_coverage_boost_to_99():
     from unittest.mock import patch
 
     # === api.py legacy coverage ===
-    from aggdisagg.api import AggDisaggModel, AggDisaggResult, disaggregate, aggregate
+    from aggdisagg.api import AggDisaggModel, AggDisaggResult, aggregate, disaggregate
     from aggdisagg.conversion import Conversion
 
     # AggDisaggResult different conversions + check_consistency
@@ -408,7 +408,11 @@ def test_coverage_boost_to_99():
     assert len(back) == 2
 
     # === core.py hard branches ===
-    from aggdisagg.core import _bootstrap_uncertainty, _build_c_matrix, _correct_negatives
+    from aggdisagg.core import (
+        _bootstrap_uncertainty,
+        _build_c_matrix,
+        _correct_negatives,
+    )
     def bad_fn(yb, xh):
         raise ValueError("boom")
     mean, std = _bootstrap_uncertainty(np.array([1.,2.]), np.ones((24,1)), bad_fn, n_bootstrap=3)
@@ -416,7 +420,7 @@ def test_coverage_boost_to_99():
     assert np.all(std == 0) or len(std) > 0  # hits no preds or except path
 
     # _expand_to_high_freq and _expand_index (placeholders)
-    from aggdisagg.core import _expand_to_high_freq, _expand_index
+    from aggdisagg.core import _expand_index, _expand_to_high_freq
     small = pl.DataFrame({"date": [date(2020,1,1), date(2021,1,1)], "y": [1.,2.]})
     ex1 = _expand_to_high_freq(small, "date", "1mo", 12)
     assert len(ex1) == 24
@@ -454,6 +458,7 @@ def test_coverage_boost_to_99():
     with patch.dict(sys.modules, {"xarray": None}):
         # re-import to pick up the None
         import importlib
+
         import aggdisagg.core as core_mod
         importlib.reload(core_mod)
         with pytest.raises(ImportError):
@@ -468,6 +473,7 @@ def test_coverage_boost_to_99():
     # get_sktime_transformer when sktime ImportError
     with patch.dict(sys.modules, {"sktime.transformations.base": None}):
         import importlib
+
         import aggdisagg.core as core_mod2
         importlib.reload(core_mod2)
         a6 = core_mod2.TemporalAligner()
@@ -475,7 +481,6 @@ def test_coverage_boost_to_99():
             a6.get_sktime_transformer()
 
     # _correct_negatives more: no negs early return (already hit), and scale with zero current
-    from aggdisagg.core import _correct_negatives
     C = _build_c_matrix(4, 2, "sum")
     yhigh = np.array([1.,2.,3.,4.])
     fixed = _correct_negatives(yhigh, C, np.array([3.,7.]))
@@ -488,9 +493,9 @@ def test_coverage_boost_to_99():
     assert a7._n_low >= 1  # actual n_low depends on column detection in fit; at least exercised the series path
 
     # === methods.py placeholders ===
-    from aggdisagg.methods import Denton, ChowLin, Conversion as Conv
+    from aggdisagg.methods import Conversion as Conv
+    from aggdisagg.methods import Denton
     d = Denton()
-    cl = ChowLin()
     # they fall back to Uniform impl
     y = np.array([100.,200.])
     out = d.disaggregate(y, 8, Conv.SUM)
@@ -501,10 +506,9 @@ def test_coverage_boost_to_99():
     print("Coverage boost tests executed (many additional branches hit)")
 
     # Hit the raise in _get_method exactly
-    try:
-        AggDisaggModel(method="bad")
-    except ValueError:
-        pass  # covers line ~74
+    import contextlib
+    with contextlib.suppress(ValueError):
+        AggDisaggModel(method="bad")  # covers line ~74
 
     # Hit the n_high=None heuristic (line ~93)
     m = AggDisaggModel(method="uniform")
@@ -556,10 +560,9 @@ def test_coverage_boost_to_99():
     a_c._n_low = 1
     a_c._C = _build_c_matrix(2, 1, "sum")
     levels = [pl.DataFrame({"y": [300.]}), pl.DataFrame({"y": [100.,200.]})]
-    try:
-        rec_d = a_c.reconcile_hierarchical(levels, method="denton")
-    except Exception:
-        pass  # the call to _apply_denton was executed (the line we wanted to cover); sizes don't match the fake C
+    import contextlib
+    with contextlib.suppress(Exception):
+        a_c.reconcile_hierarchical(levels, method="denton")  # exercises the denton line
 
 
     print("Final micro hits added")
@@ -610,7 +613,7 @@ def test_date_expansion_helper():
         "y": [100., 120., 140.]
     })
     a = TemporalAligner(target_freq="1mo")
-    high = a.fit_transform(df, "date", "y")
+    _ = a.fit_transform(df, "date", "y")
     # high may not contain "date" (by design for robustness), so use original low dates
     expanded = a.expand_high_freq_dates(df["date"])
     assert len(expanded) == 36
@@ -635,8 +638,8 @@ def test_improved_uncertainty():
     })
     # uniform should now have non-zero std thanks to re-application in bootstrap
     a = TemporalAligner(method="uniform", target_freq="1mo", n_bootstrap=20)
-    high = a.fit_transform(df, "date", "y")
-    m, s = a.predict_with_uncertainty()
+    _ = a.fit_transform(df, "date", "y")
+    _, s = a.predict_with_uncertainty()
     assert len(s) == 48
     # With the improvement, for uniform it should vary (not all zero)
     assert np.any(s > 0) or np.std(s) > 0  # at least some signal
@@ -648,7 +651,6 @@ def test_real_world_style_example():
     years = pd.date_range("2015-01-01", periods=5, freq="YE").date
     annual_gdp = [1000., 1050., 980., 1100., 1150.]
     # monthly indicator (e.g. industrial production index)
-    months = pd.date_range("2015-01-01", periods=60, freq="MS").date
     indicator = 100 + np.sin(np.arange(60) / 6) * 5 + np.random.default_rng(0).normal(0, 1, 60)
 
     low_df = pl.DataFrame({"date": years, "gdp": annual_gdp})
@@ -822,7 +824,8 @@ def test_robust_100_scenarios():
 
             # Occasional legacy check (to keep fast)
             if idx % 10 == 0:
-                from aggdisagg import disaggregate, aggregate as legacy_agg
+                from aggdisagg import aggregate as legacy_agg
+                from aggdisagg import disaggregate
                 yhi = disaggregate(y, n_high=expected_len, method="uniform", conversion=conv)
                 yb = legacy_agg(yhi, n_low=n_low, method="uniform", conversion=conv)
                 assert len(yb) == n_low
@@ -848,7 +851,7 @@ def test_robust_100_scenarios():
 
     total_time = time.time() - start_time
     passed = sum(1 for r in results if r[1] == "PASS")
-    print(f"\n=== 100 SCENARIOS COMPLETE ===")
+    print("\n=== 100 SCENARIOS COMPLETE ===")
     print(f"Passed: {passed}/100")
     print(f"Total wall time: {total_time/60:.1f} minutes")
     assert passed >= 95, f"Too many failures: only {passed} passed. Failures: {[r for r in results if r[1] != 'PASS'][:5]}"
