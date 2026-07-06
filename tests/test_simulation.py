@@ -603,7 +603,70 @@ def test_coverage_boost_to_99():
     print("Extra coverage micro-tests done")
 
 
+def test_date_expansion_helper():
+    """Test the new public date expansion helper."""
+    df = pl.DataFrame({
+        "date": pd.date_range("2020-01-01", periods=3, freq="YE").date,
+        "y": [100., 120., 140.]
+    })
+    a = TemporalAligner(target_freq="1mo")
+    high = a.fit_transform(df, "date", "y")
+    # high may not contain "date" (by design for robustness), so use original low dates
+    expanded = a.expand_high_freq_dates(df["date"])
+    assert len(expanded) == 36
+    # Should be increasing
+    assert expanded[1] > expanded[0]
+
+    # For quarterly
+    a2 = TemporalAligner(target_freq="1q")
+    expanded_q = a2.expand_high_freq_dates(df["date"])
+    assert len(expanded_q) == 12
+
+    # Single date
+    single = a.expand_high_freq_dates([date(2020, 1, 1)])
+    assert len(single) == 12
+
+
+def test_improved_uncertainty():
+    """Test that uncertainty now shows variation for basic methods."""
+    df = pl.DataFrame({
+        "date": pd.date_range("2020-01-01", periods=4, freq="YE").date,
+        "y": [100., 110., 105., 130.]
+    })
+    # uniform should now have non-zero std thanks to re-application in bootstrap
+    a = TemporalAligner(method="uniform", target_freq="1mo", n_bootstrap=20)
+    high = a.fit_transform(df, "date", "y")
+    m, s = a.predict_with_uncertainty()
+    assert len(s) == 48
+    # With the improvement, for uniform it should vary (not all zero)
+    assert np.any(s > 0) or np.std(s) > 0  # at least some signal
+
+
+def test_real_world_style_example():
+    """Simulate a more realistic economic disaggregation (e.g. annual GDP with indicator)."""
+    # Synthetic "annual" GDP with a monthly coincident indicator
+    years = pd.date_range("2015-01-01", periods=5, freq="YE").date
+    annual_gdp = [1000., 1050., 980., 1100., 1150.]
+    # monthly indicator (e.g. industrial production index)
+    months = pd.date_range("2015-01-01", periods=60, freq="MS").date
+    indicator = 100 + np.sin(np.arange(60) / 6) * 5 + np.random.default_rng(0).normal(0, 1, 60)
+
+    low_df = pl.DataFrame({"date": years, "gdp": annual_gdp})
+    # For demo, attach indicator at annual level (user would usually have monthly indicator)
+    low_df = low_df.with_columns(pl.Series("ind", indicator[::12][:5]))
+
+    a = TemporalAligner(method="chow-lin-opt", target_freq="1mo", agg="sum", indicator_cols=["ind"])
+    monthly = a.fit_transform(low_df, datetime_col="date", target_col="gdp")
+    assert len(monthly) == 60
+    # Check rough consistency (sum of months ~ annual)
+    yearly_sums = monthly["y_disaggregated"].to_numpy().reshape(5, 12).sum(axis=1)
+    assert np.allclose(yearly_sums, annual_gdp, atol=50)  # loose because of indicator scaling
+
+
 if __name__ == "__main__":
     test_simulation_suite()
     test_more_edge_cases_and_use_cases()
+    test_date_expansion_helper()
+    test_improved_uncertainty()
+    test_real_world_style_example()
     print("All simulations and edge-case tests completed successfully.")

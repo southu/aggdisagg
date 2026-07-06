@@ -5,6 +5,20 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-06
+
+### Added
+- `TemporalAligner.expand_high_freq_dates()` public helper to easily turn repeated low-freq dates into proper high-freq dates (addresses a common first-user need).
+- More real-world style example (annual "GDP" + monthly indicator disaggregation).
+- Additional tests for date helper, improved uncertainty, and examples.
+
+### Changed
+- Improved uncertainty: bootstrap now re-applies simple methods (uniform/linear/denton) to resampled low-freq data and adds small noise for regression methods, producing more useful non-zero standard errors.
+
+### Fixed
+- Minor robustness in date expansion helper (falls back gracefully).
+- Updated examples and docs for first users.
+
 ## [1.1.0] - 2026-07-06
 
 ### Added

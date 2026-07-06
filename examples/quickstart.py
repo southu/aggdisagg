@@ -52,4 +52,8 @@ try:
 except Exception as e:
     print("xarray optional:", e)
 
-print("\n✅ v0.2 features demonstrated with perfect consistency where applicable.")
+# 8. Date expansion helper (common need because output repeats low-freq dates)
+expanded_dates = aligner.expand_high_freq_dates(df["date"])
+print("Expanded dates example (first 3):", expanded_dates.head(3).to_list())
+
+print("\n✅ Features demonstrated with perfect consistency where applicable.")
