@@ -31,12 +31,16 @@ print(TemporalAligner().fit_transform(df, datetime_col="date", target_col="y"))
 - Aggregate high → low frequency (symmetric)
 - Works with **Polars** (primary), **pandas**, and **xarray**
 
-## Installation
+## Installation + Try in 10 Seconds
 
 ```bash
-uv pip install aggdisagg
-# or with extras
-uv pip install "aggdisagg[all]"
+pip install "aggdisagg[all]" && python -c "
+import polars as pl
+from datetime import date
+from aggdisagg import TemporalAligner
+df = pl.DataFrame({'date':[date(2020,1,1),date(2021,1,1)], 'y':[1000.,1200.]})
+print(TemporalAligner(method='uniform').fit_transform(df, datetime_col='date', target_col='y'))
+"
 ```
 
 ## Quickstart with `TemporalAligner`
