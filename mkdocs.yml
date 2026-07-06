@@ -1,0 +1,14 @@
+site_name: aggdisagg
+theme:
+  name: material
+  palette:
+    primary: indigo
+nav:
+  - Home: index.md
+  - API: api.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]

@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aggdisagg"
+version = "0.1.0"
+description = "Temporal Aggregation & Disaggregation for Modern Python"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Your Name", email = "you@example.com"},
+]
+keywords = [
+    "time-series",
+    "temporal-disaggregation",
+    "temporal-aggregation",
+    "frequency-conversion",
+    "polars",
+    "pandas",
+    "econometrics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "polars>=1.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0.0"]
+xarray = ["xarray>=2023.0.0"]
+plot = ["plotly>=5.0.0"]
+sklearn = ["scikit-learn>=1.3.0"]
+all = [
+    "aggdisagg[pandas,xarray,plot,sklearn]",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/aggdisagg"
+Documentation = "https://aggdisagg.readthedocs.io"
+Repository = "https://github.com/yourusername/aggdisagg"
+Issues = "https://github.com/yourusername/aggdisagg/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aggdisagg"]
+
+[tool.uv]
+dev-dependencies = [
+    "ruff>=0.4.0",
+    "pyright>=1.1.360",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings[python]>=0.25.0",
+    "pandas>=2.0.0",
+    "xarray>=2023.0.0",
+    "plotly>=5.0.0",
+    "scikit-learn>=1.3.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "UP", "B", "C4", "SIM", "TID", "RUF",
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["aggdisagg"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.10"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = "warning"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --cov=aggdisagg --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.hatch.envs.default]
+dependencies = [
+    "ruff",
+    "pyright",
+    "pytest",
+    "pytest-cov",
+]
