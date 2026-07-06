@@ -259,17 +259,25 @@ class TemporalAligner:
                     target_col = pdf.columns[1]  # auto detect first data col
                 df = pl.from_pandas(pdf)
             else:
-                if target_col not in df.columns and len(df.columns) > 0:
-                    target_col = df.columns[0]  # pragma: no cover
+                if target_col not in df.columns:
+                    if len(df.columns) > 0:
+                        target_col = df.columns[0]
+                    else:
+                        raise KeyError(f"target_col '{target_col}' not found")  # pragma: no cover
                 df = pl.from_pandas(df)
 
         if pd is not None and isinstance(df, pd.Series) and isinstance(df.index, pd.DatetimeIndex):
             # pandas Series with DatetimeIndex
             pdf = df.reset_index()
             datetime_col = pdf.columns[0]
-            target_col = pdf.columns[1]
+            if len(pdf.columns) > 1:
+                target_col = pdf.columns[1]
+            else:
+                raise KeyError(f"target_col not found in series reset")
             df = pl.from_pandas(pdf)
 
+        if datetime_col not in df.columns:
+            raise KeyError(f"datetime_col '{datetime_col}' not found in df")
         y_low, X_high, _n_high = self._prepare_data(df, datetime_col, target_col)
 
         if self.method in ("uniform", "linear"):

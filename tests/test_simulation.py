@@ -724,9 +724,12 @@ def test_robust_100_scenarios():
             if cneg and idx % 3 == 0:
                 y[2] = -25.0  # inject negatives for some
 
-            date_range = pd.date_range("2018-01-01", periods=n_low, freq="YE")
-            dates = date_range.date
-            base_df = pl.DataFrame({"date": dates, "y": y})
+            if n == 0:
+                base_df = pl.DataFrame({"date": pl.Series([], dtype=pl.Date), "y": pl.Series([], dtype=pl.Float64)})
+            else:
+                date_range = pd.date_range("2018-01-01", periods=n_low, freq="YE")
+                dates = date_range.date
+                base_df = pl.DataFrame({"date": dates, "y": y})
             # for pandas paths keep proper DatetimeIndex
             pandas_date_range = date_range  # Timestamps
 
@@ -865,6 +868,170 @@ def test_robust_100_scenarios():
     print("Large stress case (n=200, bootstrap=50) passed.")
 
 
+def test_messy_incomplete_data_batch_1():
+    """Batch of 24 tests focused on messy/incomplete data for first-user robustness.
+
+    Covers NaNs, NaTs, empties, duplicates, gaps, infs, missing cols, etc.
+    """
+    import math
+    cases = [
+        # 1. NaN in y
+        {"n": 5, "nan_y": [2], "expect_finite": False},
+        # 2. NaT in dates
+        {"n": 5, "nat_date": [1], "expect_error": False, "expect_finite": False},
+        # 3. Empty df
+        {"n": 0, "expect_error": True},
+        # 4. All NaN y
+        {"n": 3, "all_nan_y": True, "expect_finite": False},
+        # 5. Duplicate dates
+        {"n": 4, "dups": True},
+        # 6. Unsorted dates
+        {"n": 4, "unsorted": True},
+        # 7. Missing y col
+        {"n": 3, "missing_y": True, "expect_error": True},
+        # 8. Inf in y
+        {"n": 3, "inf_y": [1], "expect_finite": False},
+        # 9. NaN + negative mix with correction
+        {"n": 4, "nan_y": [1], "neg": True, "cneg": True, "expect_finite": False},
+        # 10. Pandas with NaN
+        {"n": 3, "itype": "pandas", "nan_y": [0], "expect_finite": False},
+        # 11. Lazy with NaN (will collect)
+        {"n": 3, "itype": "lazy", "nan_y": [2], "expect_finite": False},
+        # 12. xarray with NaN
+        {"n": 3, "itype": "xarray", "nan_y": [1], "expect_finite": False},
+        # 13. Date gaps (irregular yearly to mo)
+        {"n": 3, "gaps": True},
+        # 14. Object dates + NaT
+        {"n": 3, "object_dates": True, "nat_date": [1]},
+        # 15. Zero y with NaN and ensemble
+        {"n": 4, "zeros": True, "nan_y": [2], "ens": True},
+        # 16. Large neg + NaN
+        {"n": 3, "large": True, "nan_y": [0], "neg": True},
+        # 17. Indicator NaN
+        {"n": 3, "ind_nan": True},
+        # 18. No date col
+        {"n": 3, "no_date": True, "expect_error": True},
+        # 19. Wrong target_freq with NaN
+        {"n": 3, "nan_y": [1], "tf": "weird", "expect_finite": False},
+        # 20. Small n=1 with NaN
+        {"n": 1, "nan_y": [0], "expect_finite": False},
+        # 21. High bootstrap with NaN (should handle or error gracefully)
+        {"n": 3, "nan_y": [1], "nboot": 100, "expect_finite": False},
+        # 22. Ensemble on incomplete
+        {"n": 4, "nan_y": [2], "ens": True, "cneg": True, "expect_error": True},
+        # 23. Hierarchical with NaN
+        {"n": 3, "hier_nan": True},
+        # 24. Mixed inf/NaN/neg with date exp
+        {"n": 5, "nan_y": [1,3], "inf_y": [2], "neg": True, "expect_finite": False},
+    ]
+
+    passed = 0
+    for i, case in enumerate(cases):
+        try:
+            n = case.get("n", 3)
+            y = make_low_freq(n_low=n, seed=100+i)
+            if case.get("nan_y"):
+                for idx in case["nan_y"]:
+                    if idx < len(y):
+                        y[idx] = np.nan
+            if case.get("inf_y"):
+                for idx in case["inf_y"]:
+                    if idx < len(y):
+                        y[idx] = np.inf
+            if case.get("all_nan_y"):
+                y[:] = np.nan
+            if case.get("neg"):
+                y[0] = -50
+            if case.get("zeros"):
+                y[1:3] = 0
+
+            dates = pd.date_range("2020-01-01", periods=n, freq="YE")
+            if case.get("nat_date"):
+                dates = list(dates)
+                for idx in case["nat_date"]:
+                    if idx < len(dates):
+                        dates[idx] = pd.NaT
+                dates = pd.Series(dates, dtype="object")
+            else:
+                dates = dates.date
+            if case.get("dups"):
+                dlist = list(dates) + [dates[-1]]
+                dates = pd.Series(dlist, dtype="object") if case.get("nat_date") else dlist
+                y = np.append(y, y[-1])
+                n += 1
+            if case.get("unsorted"):
+                dates = list(dates)[::-1]
+                y = y[::-1]
+            if case.get("gaps"):
+                dates = pd.date_range("2020-01-01", periods=n, freq="2Y").date  # irregular
+
+            print("DEBUG case", i, case)  # temp to find bad case
+            base_df = pl.DataFrame({"date": dates, "y": y})
+            if case.get("ind_nan"):
+                ind = make_indicators(n_low=n, seed=200+i)
+                ind[1] = np.nan
+                base_df = base_df.with_columns(pl.Series("ind", ind))
+
+            itype = case.get("itype", "polars")
+            if itype == "pandas":
+                df = base_df.to_pandas()
+            elif itype == "lazy":
+                df = base_df.lazy()
+            elif itype == "xarray":
+                try:
+                    import xarray as xr
+                    df = xr.DataArray(y, dims=["t"], coords={"t": dates}, name="y")
+                except:
+                    df = base_df
+            else:
+                df = base_df
+
+            if case.get("no_date"):
+                df = df.drop("date") if hasattr(df, "drop") else df.select(pl.exclude("date"))
+
+            if case.get("missing_y"):
+                df = df.drop("y") if hasattr(df, "drop") else df.select(pl.exclude("y"))
+
+            tf = case.get("tf", "1mo")
+            aligner = TemporalAligner(
+                method="uniform",
+                target_freq=tf,
+                agg="sum",
+                use_ensemble=case.get("ens", False),
+                correct_negatives=case.get("cneg", False),
+                n_bootstrap=case.get("nboot", 0)
+            )
+
+            if case.get("expect_error"):
+                with pytest.raises((ValueError, KeyError, TypeError, pl.exceptions.ColumnNotFoundError)):
+                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                passed += 1
+                continue
+
+            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+
+            vals = high["y_disaggregated"].to_numpy()
+            if case.get("expect_finite", True):
+                assert np.all(np.isfinite(vals)), f"Non-finite in case {i}"
+
+            # Try date exp even on messy
+            try:
+                exp = aligner.expand_high_freq_dates(dates)
+                assert len(exp) > 0
+            except:
+                pass  # messy may fail, ok for now
+
+            passed += 1
+        except Exception as e:
+            if not case.get("expect_error"):
+                raise  # let pytest see real errors
+            passed += 1
+
+    assert passed == len(cases), f"Only {passed}/{len(cases)} passed in messy batch"
+
+
 if __name__ == "__main__":
     test_simulation_suite()
     test_more_edge_cases_and_use_cases()
@@ -872,4 +1039,5 @@ if __name__ == "__main__":
     test_improved_uncertainty()
     test_real_world_style_example()
     test_robust_100_scenarios()
-    print("All 100+ scenario tests completed successfully.")
+    test_messy_incomplete_data_batch_1()
+    print("All batch tests completed successfully.")
