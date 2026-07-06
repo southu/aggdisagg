@@ -34,5 +34,5 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # For TestPyPI first: use environment testpypi and --repository testpypi in manual, or separate job
-EOF
+        # For TestPyPI first (optional): use a separate job or environment "testpypi" + --repository testpypi
+
