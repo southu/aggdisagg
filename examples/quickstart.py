@@ -1,8 +1,10 @@
 """Quickstart example — v0.2 features with TemporalAligner."""
 
-import polars as pl
 from datetime import date
+
 import numpy as np
+import polars as pl
+
 from aggdisagg import TemporalAligner
 
 print("=== aggdisagg v0.2 Quickstart ===\n")

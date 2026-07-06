@@ -10,30 +10,24 @@ from __future__ import annotations
 
 __version__ = "1.0.0"
 
-from .core import TemporalAligner
+# Backwards compatible convenience (optional)
+from .api import AggDisaggModel, aggregate, disaggregate
 from .conversion import Conversion, make_aggregation_matrix
+from .core import TemporalAligner
 from .methods import Method
 
-# Backwards compatible convenience (optional)
-from .api import disaggregate, aggregate, AggDisaggModel
-
 __all__ = [
-    "TemporalAligner",
-    "Conversion",
-    "make_aggregation_matrix",
-    "Method",
-    "disaggregate",
-    "aggregate",
     "AggDisaggModel",
+    "Conversion",
+    "Method",
+    "TemporalAligner",
+    "aggregate",
+    "disaggregate",
+    "make_aggregation_matrix",
 ]
 
-# Re-export main
-TemporalAligner = TemporalAligner  # explicit
-
-
 # Optional sktime export
-try:
-    from .core import TemporalAligner as _TA
-    # users can do aligner.get_sktime_transformer()
-except Exception:
-    pass
+import contextlib
+
+with contextlib.suppress(ImportError):
+    from .core import TemporalAligner  # re-export for .get_sktime_transformer() access

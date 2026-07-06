@@ -12,12 +12,11 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 import numpy as np
-from scipy import linalg, optimize
-from typing import Literal, Optional, Any, Union
 import polars as pl
-from datetime import datetime, timedelta
-import warnings
+from scipy import linalg, optimize
 
 try:
     import pandas as pd
@@ -31,7 +30,7 @@ except ImportError:
 
 from .conversion import Conversion, make_aggregation_matrix
 
-__all__ = ["TemporalAligner", "Conversion", "make_aggregation_matrix", "_build_c_matrix"]  # internal ok
+__all__ = ["Conversion", "TemporalAligner", "_build_c_matrix", "make_aggregation_matrix"]  # internal ok
 
 
 def _build_c_matrix(n_high: int, n_low: int, agg: str) -> np.ndarray:
@@ -119,7 +118,7 @@ def _bootstrap_uncertainty(
         try:
             p = method_fn(yb, X_high)  # simplistic
             preds.append(p)
-        except:
+        except Exception:
             pass
     if not preds:
         return np.zeros_like(X_high[:, 0]), np.zeros_like(X_high[:, 0])
@@ -146,7 +145,7 @@ def _expand_index(df: pl.DataFrame, datetime_col: str, target_freq: str) -> pl.D
         raise ValueError("Need at least 2 dates")
     
     # Infer low freq step (very basic)
-    delta = (dates[1] - dates[0]).days if hasattr(dates[0], 'days') else 365
+    # delta = (dates[1] - dates[0]).days if hasattr(dates[0], 'days') else 365
     # Use polars for proper range - simplified here
     # For demo, we'll assume user provides or we use simple repeat logic in methods.
     # Better: return expanded frame with repeated low y and interpolated X if needed.
@@ -170,8 +169,8 @@ class TemporalAligner:
         method: str = "uniform",
         target_freq: str = "1mo",
         agg: Literal["sum", "mean", "first", "last"] = "sum",
-        indicator_cols: Optional[list[str]] = None,
-        rho: Optional[float] = None,
+        indicator_cols: list[str] | None = None,
+        rho: float | None = None,
         correct_negatives: bool = True,
         use_ensemble: bool = False,
         n_bootstrap: int = 100,
@@ -187,16 +186,16 @@ class TemporalAligner:
         self.n_bootstrap = n_bootstrap
         self.kwargs = kwargs
 
-        self._C: Optional[np.ndarray] = None
+        self._C: np.ndarray | None = None
         self._n_low: int = 0
         self._n_high: int = 0
-        self._beta: Optional[np.ndarray] = None
-        self._fitted_rho: Optional[float] = None
-        self._low_y: Optional[np.ndarray] = None
-        self._X_high: Optional[np.ndarray] = None
-        self._datetime_col: Optional[str] = None
-        self._target_col: Optional[str] = None
-        self._std_errors: Optional[np.ndarray] = None
+        self._beta: np.ndarray | None = None
+        self._fitted_rho: float | None = None
+        self._low_y: np.ndarray | None = None
+        self._X_high: np.ndarray | None = None
+        self._datetime_col: str | None = None
+        self._target_col: str | None = None
+        self._std_errors: np.ndarray | None = None
         self._methods_used: list = []  # for ensemble
 
     def _prepare_data(
@@ -237,7 +236,7 @@ class TemporalAligner:
         self._C = _build_c_matrix(n_high, n_low, self.agg)
         return y_low, X_high, n_high
 
-    def fit(self, df: Union[pl.DataFrame, pl.LazyFrame, "pd.DataFrame", Any], datetime_col: str = "date", target_col: str = "y") -> "TemporalAligner":
+    def fit(self, df: Any, datetime_col: str = "date", target_col: str = "y") -> TemporalAligner:
         # Support pandas DatetimeIndex (wide or series)
         if pd is not None and isinstance(df, pd.DataFrame):
             if isinstance(df.index, pd.DatetimeIndex):
@@ -258,7 +257,7 @@ class TemporalAligner:
             target_col = pdf.columns[1]
             df = pl.from_pandas(pdf)
 
-        y_low, X_high, n_high = self._prepare_data(df, datetime_col, target_col)
+        y_low, X_high, _n_high = self._prepare_data(df, datetime_col, target_col)
 
         if self.method in ("uniform", "linear"):
             # Simple methods don't need fit really
@@ -300,7 +299,7 @@ class TemporalAligner:
                 y_h = X_high @ beta + u_h
                 rss = np.sum(resid_l ** 2)
                 return beta, y_h, rss
-            except:
+            except Exception:
                 return None, None, 1e10
 
         if self.rho is not None:
@@ -316,7 +315,7 @@ class TemporalAligner:
                 _, _, r2 = _gls_for_rho(float(r))
                 return r2
             res = optimize.minimize_scalar(obj, bounds=(0.01, 0.99), method="bounded", options={"xatol": 1e-6})
-            rho_opt = float(res.x)
+            rho_opt = float(getattr(res, "x", 0.5))
         else:
             # minrss or maxlog approx by minrss here
             rho_opt = 0.5  # fallback
@@ -378,7 +377,7 @@ class TemporalAligner:
         try:
             sol = linalg.solve(A, b)
             y_h = sol[:n_h]
-        except:
+        except Exception:
             # fallback
             y_h = self._apply_simple(y_low, n_h)
 
@@ -390,7 +389,7 @@ class TemporalAligner:
 
     def transform(self, df: pl.DataFrame) -> pl.DataFrame:
         """For new data or same structure. In disagg context mainly for fit_transform."""
-        if not self._fitted:
+        if not self._fitted:  # type: ignore[attr-defined]
             raise RuntimeError("Call fit first")
         # For skeleton assume same structure, return the precomputed or recompute
         if hasattr(self, '_y_high'):
@@ -400,7 +399,7 @@ class TemporalAligner:
             y_h = self._apply_simple(y_low, self._n_high)
         return df.with_columns(pl.Series("y_high", y_h).alias("y_disaggregated"))  # placeholder
 
-    def fit_transform(self, df: Union[pl.DataFrame, pl.LazyFrame, Any], datetime_col: str = "date", target_col: str = "y") -> pl.DataFrame:
+    def fit_transform(self, df: pl.DataFrame | pl.LazyFrame | Any, datetime_col: str = "date", target_col: str = "y") -> pl.DataFrame | pl.LazyFrame:
         # Support lazy: collect for heavy ops
         is_lazy = isinstance(df, pl.LazyFrame)
         if is_lazy:
@@ -458,7 +457,7 @@ class TemporalAligner:
         # Uncertainty (simple bootstrap + analytic for regression)
         if self.n_bootstrap > 0:
             try:
-                mean_pred, std_err = _bootstrap_uncertainty(y_low, self._X_high or np.ones((self._n_high,1)), lambda yl, xh: y_h, self.n_bootstrap)
+                _mean_pred, std_err = _bootstrap_uncertainty(y_low, self._X_high or np.ones((self._n_high,1)), lambda yl, xh: y_h, self.n_bootstrap)
                 self._std_errors = std_err
             except Exception:
                 self._std_errors = np.zeros_like(y_h)
@@ -493,9 +492,9 @@ class TemporalAligner:
         y_l = self._C @ y_h
         return pl.DataFrame({f"y_{freq}": y_l})
 
-    def predict(self, n_high: Optional[int] = None) -> np.ndarray:
-        if hasattr(self, '_y_high'):
-            return self._y_high
+    def predict(self, n_high: int | None = None) -> np.ndarray:
+        if hasattr(self, '_y_high') and self._y_high is not None:
+            return self._y_high  # type: ignore[return-value]
         if self._low_y is not None:
             return self._apply_simple(self._low_y, n_high or self._n_high)
         raise RuntimeError("No prediction available")
@@ -515,7 +514,7 @@ class TemporalAligner:
             "ensemble": self.use_ensemble,
         }
 
-    def predict_with_uncertainty(self, n_bootstrap: Optional[int] = None) -> tuple[np.ndarray, np.ndarray]:
+    def predict_with_uncertainty(self, n_bootstrap: int | None = None) -> tuple[np.ndarray, np.ndarray]:
         """Return (mean, std) using bootstrap or stored errors."""
         if self._y_high is None:
             raise RuntimeError("Call fit_transform first")
@@ -528,7 +527,7 @@ class TemporalAligner:
             return self._y_high, self._std_errors
         return self._y_high, np.zeros_like(self._y_high)
 
-    def to_xarray(self, high_df: pl.DataFrame, time_col: str = "date", value_col: str = "y_disaggregated") -> "xr.DataArray":
+    def to_xarray(self, high_df: pl.DataFrame, time_col: str = "date", value_col: str = "y_disaggregated") -> Any:
         """Convert result to xarray DataArray (requires xarray)."""
         if xr is None:
             raise ImportError("xarray not installed. Use pip install xarray")
@@ -543,18 +542,18 @@ class TemporalAligner:
         )
 
     @classmethod
-    def from_xarray(cls, da: "xr.DataArray", **kwargs) -> "TemporalAligner":
+    def from_xarray(cls, da: Any, **kwargs) -> TemporalAligner:
         """Create from xarray (basic)."""
         if xr is None:
             raise ImportError("xarray required")
-        df = da.to_dataframe().reset_index()
-        df = pl.from_pandas(df)
+        pdf = da.to_dataframe().reset_index()
+        pl.from_pandas(pdf)  # type: ignore[arg-type]
         return cls(**kwargs)
 
     def reconcile_hierarchical(
         self,
         levels: list[pl.DataFrame],
-        level_names: list[str] = None,
+        level_names: list[str] | None = None,
         method: str = "proportional",
     ) -> list[pl.DataFrame]:
         """
@@ -587,10 +586,10 @@ class TemporalAligner:
         try:
             from sktime.transformations.base import BaseTransformer
         except ImportError:
-            raise ImportError("Install sktime for the wrapper: pip install sktime")
+            raise ImportError("Install sktime for the wrapper: pip install sktime") from None
 
         class _SktimeWrapper(BaseTransformer):
-            def __init__(self, aligner: "TemporalAligner"):
+            def __init__(self, aligner: TemporalAligner):
                 self.aligner = aligner
             def _fit(self, X, y=None):
                 return self
@@ -598,5 +597,8 @@ class TemporalAligner:
                 # Expect X as pandas with datetime index or similar
                 pdf = X if pd is not None else pl.DataFrame(X).to_pandas()
                 pdf = pl.from_pandas(pdf.reset_index() if hasattr(pdf, 'reset_index') else pdf)
-                return self.aligner.fit_transform(pdf).to_pandas()
+                result = self.aligner.fit_transform(pdf)
+                if isinstance(result, pl.LazyFrame):
+                    result = result.collect()
+                return result.to_pandas()
         return _SktimeWrapper(self)

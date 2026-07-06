@@ -1,7 +1,10 @@
-import polars as pl
-import numpy as np
-from aggdisagg import TemporalAligner, disaggregate, aggregate, AggDisaggModel
 from datetime import date
+
+import numpy as np
+import polars as pl
+
+from aggdisagg import AggDisaggModel, TemporalAligner, aggregate, disaggregate
+
 
 def test_temporal_aligner_basic():
     df = pl.DataFrame({

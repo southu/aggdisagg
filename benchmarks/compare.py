@@ -6,11 +6,13 @@ Requires optional deps for others.
 """
 
 import time
-import numpy as np
-import polars as pl
 from datetime import date
 
+import numpy as np
+import polars as pl
+
 from aggdisagg import TemporalAligner
+
 
 def synthetic_data(n_low=5, ratio=12):
     y_low = np.linspace(100, 200, n_low)
@@ -20,7 +22,6 @@ def synthetic_data(n_low=5, ratio=12):
         "ind": np.random.randn(n_low * ratio)[:n_low] + np.linspace(10, 20, n_low)
     })
     # expand ind for high freq? For simplicity, use low for indicator too, but repeat.
-    ind_high = np.repeat(df["ind"].to_numpy(), ratio)
     # But for bench, make df low freq with repeated? For demo, make high freq df? 
     # For disagg bench, input low freq.
     return df
@@ -49,15 +50,13 @@ def main():
 
     # Try other libs if installed
     try:
-        import tempdisagg as td
         print("tempdisagg available, but no direct bench here for simplicity")
-    except:
+    except Exception:
         print("tempdisagg not installed (optional)")
 
     try:
-        import tsdisagg
         print("tsdisagg available")
-    except:
+    except Exception:
         print("tsdisagg not installed (optional)")
 
 if __name__ == "__main__":

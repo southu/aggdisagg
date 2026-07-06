@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
 
 import numpy as np
 import polars as pl
+
 
 class Conversion(str, Enum):
     """How low-frequency values relate to high-frequency observations."""
@@ -60,7 +60,7 @@ def infer_n_high_from_index(
     """Helper to compute expected high-frequency length from low freq index."""
     # Simplified: assumes regular spacing. Real impl would use Polars date range.
     n_low = len(low_index)
-    # Placeholder – in real code we would expand using pl.date_range
+    # Placeholder - in real code we would expand using pl.date_range
     # For skeleton we just return a reasonable multiple
     if "y" in str(target_freq).lower():
         return n_low * 12

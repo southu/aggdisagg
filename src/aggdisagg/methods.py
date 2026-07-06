@@ -97,7 +97,7 @@ class Linear(BaseMethod):
     ) -> np.ndarray:
         y = np.asarray(y_low, dtype=np.float64)
         n_low = len(y)
-        freq = n_high // n_low
+        # freq = n_high // n_low
         # Simple linear interpolation for skeleton
         x = np.arange(n_low)
         x_new = np.linspace(0, n_low - 1, n_high)

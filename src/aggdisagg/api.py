@@ -8,8 +8,8 @@ from typing import Any, Literal
 import numpy as np
 import polars as pl
 
-from .conversion import Conversion, make_aggregation_matrix
-from .methods import BaseMethod, Linear, Method, Uniform
+from .conversion import Conversion
+from .methods import BaseMethod, Linear, Uniform
 
 
 @dataclass
@@ -73,7 +73,7 @@ class AggDisaggModel:
             return Linear()
         raise ValueError(f"Unknown method: {name}. Use 'uniform' or 'linear' for now.")
 
-    def fit(self, df: pl.DataFrame | Any, y_col: str = "y", **kwargs: Any) -> "AggDisaggModel":
+    def fit(self, df: pl.DataFrame | Any, y_col: str = "y", **kwargs: Any) -> AggDisaggModel:
         """Fit on a Polars (or pandas) DataFrame in long format.
 
         Expects columns that allow inferring low-frequency groups and target length.
@@ -122,8 +122,8 @@ def disaggregate(
     y_low: pl.Series | list | np.ndarray,
     *,
     n_high: int | None = None,
-    method: str = "uniform",
-    conversion: str = "sum",
+    method: Literal["uniform", "linear"] = "uniform",
+    conversion: Literal["sum", "mean", "first", "last"] = "sum",
     **kwargs: Any,
 ) -> pl.Series:
     """One-shot disaggregation function (Polars native feel)."""
@@ -141,8 +141,8 @@ def aggregate(
     y_high: pl.Series | list | np.ndarray,
     *,
     n_low: int,
-    method: str = "uniform",
-    conversion: str = "sum",
+    method: Literal["uniform", "linear"] = "uniform",
+    conversion: Literal["sum", "mean", "first", "last"] = "sum",
 ) -> pl.Series:
     """One-shot aggregation (perfect inverse of disaggregate when using same method)."""
     model = AggDisaggModel(method=method, conversion=conversion)
