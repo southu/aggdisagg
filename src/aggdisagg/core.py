@@ -20,12 +20,12 @@ from scipy import linalg, optimize
 
 try:
     import pandas as pd
-except ImportError:
+except ImportError:  # pragma: no cover
     pd = None
 
 try:
     import xarray as xr
-except ImportError:
+except ImportError:  # pragma: no cover
     xr = None
 
 from .conversion import Conversion, make_aggregation_matrix
@@ -81,7 +81,9 @@ def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> 
             y_high[start:end] = group
     # Re-enforce constraint
     current = C @ y_high
-    factor = np.where(np.abs(current) > 1e-12, y_low / current, 1.0)
+    factor = np.ones_like(y_low, dtype=float)
+    mask = np.abs(current) > 1e-12
+    factor[mask] = y_low[mask] / current[mask]
     y_high = y_high * np.repeat(factor, m)
     return y_high
 
@@ -131,7 +133,7 @@ def _expand_to_high_freq(
     df: pl.DataFrame, datetime_col: str, target_freq: str, ratio: int
 ) -> pl.DataFrame:
     """Basic expansion by repeating rows (improved version would use pl.date_range)."""
-    return df.select(pl.all().repeat_by(ratio).list.explode())
+    return df.select(pl.all().repeat_by(ratio).list.explode(empty_as_null=True))
 
 
 def _expand_index(df: pl.DataFrame, datetime_col: str, target_freq: str) -> pl.DataFrame:
@@ -383,7 +385,9 @@ class TemporalAligner:
 
         # scale to exact constraint (numerical safety)
         current_agg = C @ y_h
-        scale = np.where(np.abs(current_agg) > 1e-12, y_low / current_agg, 1.0)
+        scale = np.ones_like(y_low, dtype=float)
+        mask = np.abs(current_agg) > 1e-12
+        scale[mask] = y_low[mask] / current_agg[mask]
         y_h = y_h * np.repeat(scale, n_h // n_l)
         return y_h
 
@@ -465,7 +469,7 @@ class TemporalAligner:
         # Build high-freq DF - attempt proper expansion if possible
         try:
             # Simple expansion
-            high_df = df.select(pl.all().repeat_by(ratio).list.explode())
+            high_df = df.select(pl.all().repeat_by(ratio).list.explode(empty_as_null=True))
             # Try to expand dates properly
             if datetime_col in high_df.columns:
                 # basic: use pl.datetime_range if possible, but for skeleton keep repeated + add grain

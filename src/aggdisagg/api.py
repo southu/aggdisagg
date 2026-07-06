@@ -105,9 +105,14 @@ class AggDisaggModel:
         return pl.Series("y_high", y_high)
 
     def transform(self, df: pl.DataFrame) -> pl.DataFrame:
-        """sklearn-style transform that adds the disaggregated column."""
+        """sklearn-style transform that adds the disaggregated column.
+
+        Note: returns a DataFrame containing the disaggregated series (length n_high);
+        does not require input df to have matching height to low-freq.
+        """
         y_high = self.predict()
-        return df.with_columns(y_high.alias("y_disagg"))
+        # Legacy path returns a standalone result frame for the high-freq values
+        return pl.DataFrame({ "y_disagg": y_high })
 
     def aggregate(self, y_high: pl.Series) -> pl.Series:
         """Convenience to aggregate a high-freq series back."""
