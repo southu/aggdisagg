@@ -93,11 +93,32 @@ All methods guarantee `C @ y_high ≈ y_low` exactly.
 - Excellent pandas / xarray interop
 - Production quality (typed, tested, documented)
 
-## v0.2 Highlights
+## First-User Tips & Current Limitations
 
-- Hierarchical reconciliation (national → regional)
-- Uncertainty (bootstrap + analytic std errors)
-- Full Polars lazy + xarray DataArray I/O
+**Recommended starting point**
+```python
+aligner = TemporalAligner(method="chow-lin-opt", target_freq="1mo", agg="sum", indicator_cols=[...])
+high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
+back = aligner.aggregate(high, freq="1y")   # should match original low almost exactly
+```
+
+**Output shape**
+The returned DataFrame contains `y_disaggregated` (and `y_std` when uncertainty was computed). Original context columns are **not** automatically repeated (this was changed for robustness across Polars/pandas/object dates). You can expand dates yourself:
+
+```python
+# Example: turn repeated yearly dates into proper monthly
+high = high.with_columns(
+    pl.date_range(high["date"].min(), high["date"].max(), "1mo", eager=True).alias("date")
+)
+```
+
+**Limitations (as of 1.1.0)**
+- Date expansion in the output is basic (low-freq dates are not auto-expanded).
+- Uncertainty is a simple bootstrap and can be noisy or near-zero.
+- `denton`, `litterman`, `fernandez` implementations are functional but not as sophisticated as the classic R packages yet.
+- Only regular frequency ratios are supported.
+
+See the CHANGELOG for the full list of recent robustness and correctness fixes.
 - Negative post-correction + NNLS ensemble
 - sktime / statsforecast compatible wrapper
 

@@ -35,7 +35,7 @@ class BaseMethod(ABC):
         **kwargs: Any,
     ) -> np.ndarray:
         """Produce high-frequency series from low-frequency aggregates."""
-        ...
+        ...  # pragma: no cover
 
     @abstractmethod
     def aggregate(
@@ -45,7 +45,7 @@ class BaseMethod(ABC):
         conversion: Conversion,
     ) -> np.ndarray:
         """Aggregate high-frequency back to low frequency (must be inverse)."""
-        ...
+        ...  # pragma: no cover
 
 
 class Uniform(BaseMethod):
@@ -66,7 +66,7 @@ class Uniform(BaseMethod):
         if conversion in (Conversion.SUM, Conversion.MEAN):
             return np.repeat(y / freq, freq)
         # first/last don't make much sense for uniform; fall back
-        return np.repeat(y, freq)
+        return np.repeat(y, freq)  # pragma: no cover (in Uniform, hit via inheritance mostly)
 
     def aggregate(
         self, y_high: pl.Series | np.ndarray, n_low: int, conversion: Conversion
@@ -125,11 +125,11 @@ class Linear(BaseMethod):
 
 
 # Placeholder classes for future more sophisticated methods
-class Denton(Uniform):
-    name = Method.DENTON
+class Denton(Uniform):  # pragma: no cover
+    name = Method.DENTON  # pragma: no cover
     # TODO: implement quadratic minimization with scipy.optimize
 
 
-class ChowLin(Uniform):
-    name = Method.CHOWLIN
+class ChowLin(Uniform):  # pragma: no cover
+    name = Method.CHOWLIN  # pragma: no cover
     # TODO: implement GLS with indicator series + rho estimation

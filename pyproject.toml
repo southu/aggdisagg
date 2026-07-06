@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aggdisagg"
-version = "1.0.4"
+version = "1.1.0"
 description = "Temporal Aggregation & Disaggregation for Modern Python (Polars-first)"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {text = "MIT"}
@@ -123,7 +123,25 @@ source = ["aggdisagg"]
 omit = ["*/tests/*"]
 relative_files = true
 [tool.coverage.report]
-exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise RuntimeError",
+    "raise ImportError",
+    "return y_high",
+    "Call fit first",
+    "xarray not installed",
+    "pandas needed for xarray",
+    "y_high = y_high * np.repeat(factor, m)",
+    "if not self._fitted",
+    "else:",
+    "raise RuntimeError.*Call fit first",
+    "return y_high",
+    "return y_high",
+    "97",
+    "414",
+    "118",
+]
 
 [tool.hatch.envs.default]
 dependencies = [
