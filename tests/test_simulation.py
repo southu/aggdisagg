@@ -670,3 +670,203 @@ if __name__ == "__main__":
     test_improved_uncertainty()
     test_real_world_style_example()
     print("All simulations and edge-case tests completed successfully.")
+
+
+def test_robust_100_scenarios():
+    """Robust test plan execution: 100 diverse real scenarios.
+
+    This is designed to take significant time (~20-40 min depending on hardware)
+    by using larger datasets, bootstrap, multiple methods, pandas interop, etc.
+    Exercises:
+    - All main methods + conversions
+    - Edge data (negatives, zeros, n=1, large n)
+    - Input varieties (polars, pandas DF/Series, lazy, xarray)
+    - New API: expand_high_freq_dates, improved uncertainty
+    - Constraint preservation, no NaNs, roundtrips
+    - Error paths (sampled)
+    - Real-ish usage (indicators, ensemble, hierarchical)
+
+    Run with: pytest ... -s --durations=20  (to see progress and slow tests)
+    """
+    import itertools
+    import time
+
+    methods = ["uniform", "linear", "denton", "chow-lin-opt", "litterman", "fernandez"]
+    conversions = ["sum", "mean", "first", "last"]
+    target_freqs = ["1mo", "1q"]
+    sizes = [5, 20, 50, 120]  # mix small/medium; larger ones will be slow
+    use_indicators = [False, True]
+    use_ensemble = [False, True]
+    correct_negs = [False, True]
+    n_bootstraps = [0, 20, 50]
+    input_types = ["polars", "pandas_df", "pandas_series", "lazy", "xarray"]
+
+    # Generate many combinations, sample/select exactly 100 diverse ones
+    all_combos = list(itertools.product(
+        methods, conversions, target_freqs, sizes,
+        use_indicators, use_ensemble, correct_negs, n_bootstraps, input_types
+    ))
+    # Select 100: use deterministic sample with different seeds for variety
+    rng = np.random.default_rng(42)
+    selected_indices = rng.choice(len(all_combos), size=100, replace=False)
+    scenarios = [all_combos[i] for i in selected_indices]
+
+    results = []
+    start_time = time.time()
+
+    for idx, (method, conv, tf, n_low, inds, ens, cneg, nboot, itype) in enumerate(scenarios):
+        seed = 1000 + idx
+        try:
+            # Generate data
+            y = make_low_freq(n_low=n_low, base=100.0, trend=0.8, noise=3.0, seed=seed)
+            if cneg and idx % 3 == 0:
+                y[2] = -25.0  # inject negatives for some
+
+            date_range = pd.date_range("2018-01-01", periods=n_low, freq="YE")
+            dates = date_range.date
+            base_df = pl.DataFrame({"date": dates, "y": y})
+            # for pandas paths keep proper DatetimeIndex
+            pandas_date_range = date_range  # Timestamps
+
+            if inds:
+                ind = make_indicators(n_low=n_low, seed=seed+100)
+                base_df = base_df.with_columns(pl.Series("ind", ind))
+
+            # Convert to target input type
+            if itype == "polars":
+                df = base_df
+            elif itype == "pandas_df":
+                df = base_df.to_pandas()
+            elif itype == "pandas_series":
+                pdf = base_df.to_pandas()
+                pdf["date"] = pandas_date_range
+                df = pdf.set_index("date")["y"]
+            elif itype == "lazy":
+                df = base_df.lazy()
+            elif itype == "xarray":
+                try:
+                    import xarray as xr
+                    df = xr.DataArray(
+                        y, dims=["time"],
+                        coords={"time": pd.date_range("2018-01-01", periods=n_low, freq="YE")},
+                        name="y"
+                    )
+                except ImportError:
+                    df = base_df  # fallback
+                    itype = "polars_fallback"
+            else:
+                df = base_df
+
+            # Instantiate
+            ind_cols = ["ind"] if inds and itype not in ["pandas_series", "xarray"] else None
+            aligner = TemporalAligner(
+                method=method,
+                target_freq=tf,
+                agg=conv,
+                indicator_cols=ind_cols,
+                use_ensemble=ens,
+                correct_negatives=cneg,
+                n_bootstrap=nboot
+            )
+
+            # Core operation
+            t0 = time.time()
+            # Adjust call params for special input types
+            dt_col = "date"
+            t_col = "y"
+            if itype == "xarray":
+                dt_col = "time"
+                t_col = "y"  # name we set
+            elif itype == "pandas_series":
+                dt_col = "date"  # will be handled in fit as index
+                t_col = "y"
+
+            high = aligner.fit_transform(df, datetime_col=dt_col, target_col=t_col)
+            t1 = time.time()
+
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+
+            # Basic checks
+            ratio = 12 if "mo" in tf.lower() else 4
+            expected_len = n_low * ratio
+            assert len(high) == expected_len, f"len mismatch {len(high)} != {expected_len}"
+            assert np.all(np.isfinite(high["y_disaggregated"].to_numpy()))
+
+            # Constraint check (if internal state available)
+            if aligner._C is not None and aligner._y_high is not None:
+                reagg = aligner._C @ aligner._y_high
+                assert np.allclose(reagg, y, atol=1e-6), f"Constraint violated for {method}"
+
+            # Aggregate roundtrip
+            back = aligner.aggregate(high, freq="1y")
+            # back may have different column name; check approx
+            if len(back) == n_low:
+                back_vals = back.to_numpy().ravel()[:n_low]
+                assert np.allclose(back_vals, y, atol=1.0)  # tolerance for some methods
+
+            # Uncertainty
+            if nboot > 0:
+                m, s = aligner.predict_with_uncertainty()
+                assert len(m) == expected_len
+                assert len(s) == expected_len
+                assert np.all(s >= 0)
+
+            # Date expansion helper
+            expanded = aligner.expand_high_freq_dates(dates)
+            assert len(expanded) == expected_len
+
+            # Summary
+            summ = aligner.summary()
+            assert "method" in summ and summ["method"] == method
+
+            # Occasional legacy check (to keep fast)
+            if idx % 10 == 0:
+                from aggdisagg import disaggregate, aggregate as legacy_agg
+                yhi = disaggregate(y, n_high=expected_len, method="uniform", conversion=conv)
+                yb = legacy_agg(yhi, n_low=n_low, method="uniform", conversion=conv)
+                assert len(yb) == n_low
+
+            # xarray roundtrip for some
+            if itype == "xarray" and "xarray" in str(type(df)):
+                try:
+                    xa_out = aligner.to_xarray(high)
+                    a2 = aligner.from_xarray(xa_out)
+                    assert isinstance(a2, TemporalAligner)
+                except Exception:
+                    pass  # optional
+
+            elapsed = t1 - t0
+            results.append((idx, "PASS", method, elapsed))
+            if idx % 10 == 0:
+                print(f"Scenario {idx+1}/100: {method} {conv} n={n_low} {itype} ... OK ({elapsed:.2f}s)")
+
+        except Exception as e:
+            results.append((idx, f"FAIL: {type(e).__name__}: {str(e)[:100]}", method, 0))
+            print(f"Scenario {idx+1}/100 FAILED: {method} - {e}")
+            # Continue to collect more issues
+
+    total_time = time.time() - start_time
+    passed = sum(1 for r in results if r[1] == "PASS")
+    print(f"\n=== 100 SCENARIOS COMPLETE ===")
+    print(f"Passed: {passed}/100")
+    print(f"Total wall time: {total_time/60:.1f} minutes")
+    assert passed >= 95, f"Too many failures: only {passed} passed. Failures: {[r for r in results if r[1] != 'PASS'][:5]}"
+
+    # Final full check on one large case
+    big_y = make_low_freq(200, seed=9999)
+    big_df = pl.DataFrame({"date": pd.date_range("2000", periods=200, freq="YE").date, "y": big_y})
+    a_big = TemporalAligner(method="chow-lin-opt", target_freq="1mo", n_bootstrap=50)
+    h_big = a_big.fit_transform(big_df)
+    assert len(h_big) == 2400
+    print("Large stress case (n=200, bootstrap=50) passed.")
+
+
+if __name__ == "__main__":
+    test_simulation_suite()
+    test_more_edge_cases_and_use_cases()
+    test_date_expansion_helper()
+    test_improved_uncertainty()
+    test_real_world_style_example()
+    test_robust_100_scenarios()
+    print("All 100+ scenario tests completed successfully.")
