@@ -8,7 +8,7 @@ Main entrypoint:
 
 from __future__ import annotations
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 # Backwards compatible convenience (optional)
 from .api import AggDisaggModel, aggregate, disaggregate
