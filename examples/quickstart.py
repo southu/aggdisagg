@@ -7,7 +7,7 @@ import polars as pl
 
 from aggdisagg import TemporalAligner
 
-print("=== aggdisagg v0.2 Quickstart ===\n")
+print("=== aggdisagg Quickstart ===\n")
 
 # 1. Basic + indicators + Chow-Lin-opt
 df = pl.DataFrame({
