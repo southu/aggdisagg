@@ -6,8 +6,8 @@ Asserts perfect aggregation consistency + reasonable behavior.
 """
 
 import numpy as np
-import polars as pl
 import pandas as pd
+import polars as pl
 import pytest
 
 from aggdisagg import TemporalAligner
@@ -55,10 +55,8 @@ def test_simulation_suite():
         "chow-lin", "chow-lin-opt", "litterman", "fernandez"
     ]
     conversions = ["sum", "mean", "first", "last"]
-    ratios = {"1mo": 12, "1q": 4}
 
     scenarios = []
-    rng = np.random.default_rng(2026)
 
     # 1-8: Basic methods + conversions (8)
     for i, method in enumerate(methods[:4]):
