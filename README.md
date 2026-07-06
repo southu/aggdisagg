@@ -6,6 +6,24 @@
 [![Polars](https://img.shields.io/badge/Polars-first-orange)](https://pola.rs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![PyPI](https://img.shields.io/pypi/v/aggdisagg)](https://pypi.org/project/aggdisagg/)
+[![GitHub](https://img.shields.io/badge/GitHub-aggdisagg-black?logo=github)](https://github.com/aggdisagg/aggdisagg)
+
+<!-- GitHub social preview: the image below is auto-generated for social sharing -->
+![aggdisagg social preview](https://opengraph.githubassets.com/1/aggdisagg/aggdisagg)
+
+**Install & try in 10 seconds:**
+
+```bash
+pip install aggdisagg
+```
+
+```python
+import polars as pl
+from aggdisagg import TemporalAligner
+df = pl.DataFrame({"date": ["2020", "2021"], "y": [100.0, 120.0]})
+print(TemporalAligner().fit_transform(df, datetime_col="date", target_col="y"))
+```
 
 **aggdisagg** is a clean, **Polars-first** Python library for converting time series between frequencies with **perfect aggregation consistency**.
 

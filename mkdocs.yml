@@ -5,7 +5,10 @@ theme:
     primary: indigo
 nav:
   - Home: index.md
-  - API: api.md
+  - Quickstart: quickstart.md
+  - API Reference: api.md
+  - Examples: examples.md
+  - Benchmarks: benchmarks.md
 plugins:
   - search
   - mkdocstrings:
@@ -17,3 +20,6 @@ markdown_extensions:
   - codehilite
   - toc:
       permalink: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

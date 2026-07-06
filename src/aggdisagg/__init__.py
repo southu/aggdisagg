@@ -27,6 +27,10 @@ __all__ = [
     "AggDisaggModel",
 ]
 
+# Re-export main
+TemporalAligner = TemporalAligner  # explicit
+
+
 # Optional sktime export
 try:
     from .core import TemporalAligner as _TA

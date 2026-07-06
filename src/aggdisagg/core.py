@@ -31,6 +31,8 @@ except ImportError:
 
 from .conversion import Conversion, make_aggregation_matrix
 
+__all__ = ["TemporalAligner", "Conversion", "make_aggregation_matrix", "_build_c_matrix"]  # internal ok
+
 
 def _build_c_matrix(n_high: int, n_low: int, agg: str) -> np.ndarray:
     """Build aggregation matrix C (n_low x n_high) such that y_low = C @ y_high"""
@@ -130,7 +132,7 @@ def _expand_to_high_freq(
     df: pl.DataFrame, datetime_col: str, target_freq: str, ratio: int
 ) -> pl.DataFrame:
     """Basic expansion by repeating rows (improved version would use pl.date_range)."""
-    return df.select(pl.all().repeat_by(ratio).flatten())
+    return df.select(pl.all().repeat_by(ratio).list.explode())
 
 
 def _expand_index(df: pl.DataFrame, datetime_col: str, target_freq: str) -> pl.DataFrame:
@@ -235,7 +237,27 @@ class TemporalAligner:
         self._C = _build_c_matrix(n_high, n_low, self.agg)
         return y_low, X_high, n_high
 
-    def fit(self, df: pl.DataFrame, datetime_col: str = "date", target_col: str = "y") -> "TemporalAligner":
+    def fit(self, df: Union[pl.DataFrame, pl.LazyFrame, "pd.DataFrame", Any], datetime_col: str = "date", target_col: str = "y") -> "TemporalAligner":
+        # Support pandas DatetimeIndex (wide or series)
+        if pd is not None and isinstance(df, pd.DataFrame):
+            if isinstance(df.index, pd.DatetimeIndex):
+                pdf = df.reset_index()
+                datetime_col = pdf.columns[0]
+                if target_col not in pdf.columns and len(pdf.columns) > 1:
+                    target_col = pdf.columns[1]  # auto detect first data col
+                df = pl.from_pandas(pdf)
+            else:
+                if target_col not in df.columns and len(df.columns) > 0:
+                    target_col = df.columns[0]
+                df = pl.from_pandas(df)
+
+        if pd is not None and isinstance(df, pd.Series) and isinstance(df.index, pd.DatetimeIndex):
+            # pandas Series with DatetimeIndex
+            pdf = df.reset_index()
+            datetime_col = pdf.columns[0]
+            target_col = pdf.columns[1]
+            df = pl.from_pandas(pdf)
+
         y_low, X_high, n_high = self._prepare_data(df, datetime_col, target_col)
 
         if self.method in ("uniform", "linear"):
@@ -293,7 +315,7 @@ class TemporalAligner:
             def obj(r):
                 _, _, r2 = _gls_for_rho(float(r))
                 return r2
-            res = optimize.minimize_scalar(obj, bounds=(0.01, 0.99), method="bounded", tol=1e-6)
+            res = optimize.minimize_scalar(obj, bounds=(0.01, 0.99), method="bounded", options={"xatol": 1e-6})
             rho_opt = float(res.x)
         else:
             # minrss or maxlog approx by minrss here
@@ -444,7 +466,7 @@ class TemporalAligner:
         # Build high-freq DF - attempt proper expansion if possible
         try:
             # Simple expansion
-            high_df = df.select(pl.all().repeat_by(ratio).flatten())
+            high_df = df.select(pl.all().repeat_by(ratio).list.explode())
             # Try to expand dates properly
             if datetime_col in high_df.columns:
                 # basic: use pl.datetime_range if possible, but for skeleton keep repeated + add grain
