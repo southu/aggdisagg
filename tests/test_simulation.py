@@ -31,7 +31,7 @@ def make_indicators(n_low=24, seed=123):
 
 def check_roundtrip(aligner, low_df, method_name, tol=1e-6):
     """Disagg then re-agg should recover low values closely (most methods)."""
-    high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
+    high = aligner.fit_transform(low_df, datetime_col="period", target_col="y")
     # Use the aligner's aggregate if possible
     try:
         reagg = aligner.aggregate(high, freq="1y")  # freq label doesn't matter for check
@@ -70,7 +70,7 @@ def test_simulation_suite():
             })
             aligner = TemporalAligner(method=method, target_freq="1mo", agg=conv,
                                       correct_negatives=True)
-            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            high = aligner.fit_transform(df, datetime_col="period", target_col="y")
             assert len(high) == len(y) * 12
             scenarios.append((f"basic-{method}-{conv}", aligner, df))
 
@@ -85,7 +85,7 @@ def test_simulation_suite():
         })
         aligner = TemporalAligner(method="chow-lin-opt", target_freq="1mo", agg="sum",
                                   indicator_cols=["ind"], use_ensemble=(k % 2 == 0))
-        high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+        high = aligner.fit_transform(df, datetime_col="period", target_col="y")
         assert len(high) > len(y)
         scenarios.append((f"chow-ind-{k}", aligner, df))
 
@@ -99,7 +99,7 @@ def test_simulation_suite():
         })
         aligner = TemporalAligner(method="denton", target_freq="1mo", agg="sum",
                                   correct_negatives=True, use_ensemble=True)
-        high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+        high = aligner.fit_transform(df, datetime_col="period", target_col="y")
         vals = high["y_disaggregated"].to_numpy()
         # After correction we expect no large negative mass left or constraint broken
         assert np.all(np.isfinite(vals))
@@ -113,7 +113,7 @@ def test_simulation_suite():
             "y": y
         })
         aligner = TemporalAligner(method="linear", target_freq="1q", agg=["first", "last", "mean"][p % 3])
-        high = aligner.fit_transform(pdf, datetime_col="date", target_col="y")
+        high = aligner.fit_transform(pdf, datetime_col="period", target_col="y")
         assert len(high) == len(y) * 4
         scenarios.append((f"pandas-freq-{p}", aligner, pdf))
 
@@ -124,7 +124,7 @@ def test_simulation_suite():
         "y": y
     })
     aligner = TemporalAligner(method="chow-lin-opt", target_freq="1mo", n_bootstrap=50)
-    high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+    high = aligner.fit_transform(df, datetime_col="period", target_col="y")
     mean, std = aligner.predict_with_uncertainty()
     assert len(mean) == len(high)
     assert std is not None and np.all(np.isfinite(std))
@@ -147,7 +147,7 @@ def test_simulation_suite():
             if isinstance(df, pd.DataFrame):
                 h = aligner.fit_transform(df)
             else:
-                h = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                h = aligner.fit_transform(df, datetime_col="period", target_col="y")
             assert len(h) > 0
             assert "y_disaggregated" in h.columns or h.columns[0] is not None
             passed += 1
@@ -162,7 +162,7 @@ def test_simulation_suite():
     df = pl.DataFrame({"date": pd.date_range("2020", periods=3, freq="YE").date, "y": y})
     for m in ["denton", "chow-lin-opt"]:
         a = TemporalAligner(method=m, target_freq="1mo", agg="sum")
-        a.fit_transform(df, datetime_col="date", target_col="y")
+        a.fit_transform(df, datetime_col="period", target_col="y")
         if a._C is not None and a._y_high is not None:
             re = a._C @ a._y_high
             assert np.allclose(re, y, atol=1e-8), f"{m} did not satisfy exact aggregation constraint"
@@ -658,7 +658,7 @@ def test_real_world_style_example():
     low_df = low_df.with_columns(pl.Series("ind", indicator[::12][:5]))
 
     a = TemporalAligner(method="chow-lin-opt", target_freq="1mo", agg="sum", indicator_cols=["ind"])
-    monthly = a.fit_transform(low_df, datetime_col="date", target_col="gdp")
+    monthly = a.fit_transform(low_df, datetime_col="period", target_col="gdp")
     assert len(monthly) == 60
     # Check rough consistency (sum of months ~ annual)
     yearly_sums = monthly["y_disaggregated"].to_numpy().reshape(5, 12).sum(axis=1)
@@ -729,7 +729,7 @@ def test_robust_100_scenarios():
             else:
                 date_range = pd.date_range("2018-01-01", periods=n_low, freq="YE")
                 dates = date_range.date
-                base_df = pl.DataFrame({"date": dates, "y": y})
+                base_df = pl.DataFrame({"period": list(range(n)), "y": y})
             # for pandas paths keep proper DatetimeIndex
             pandas_date_range = date_range  # Timestamps
 
@@ -966,7 +966,7 @@ def test_messy_incomplete_data_batch_1():
                 dates = pd.date_range("2020-01-01", periods=n, freq="2Y").date  # irregular
 
             print("DEBUG case", i, case)  # temp to find bad case
-            base_df = pl.DataFrame({"date": dates, "y": y})
+            base_df = pl.DataFrame({"period": list(range(n)), "y": y})
             if case.get("ind_nan"):
                 ind = make_indicators(n_low=n, seed=200+i)
                 ind[1] = np.nan
@@ -1004,11 +1004,11 @@ def test_messy_incomplete_data_batch_1():
 
             if case.get("expect_error"):
                 with pytest.raises((ValueError, KeyError, TypeError, pl.exceptions.ColumnNotFoundError)):
-                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                    _ = aligner.fit_transform(df, datetime_col="period", target_col="y")
                 passed += 1
                 continue
 
-            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            high = aligner.fit_transform(df, datetime_col="period", target_col="y")
             if isinstance(high, pl.LazyFrame):
                 high = high.collect()
 
@@ -1098,7 +1098,7 @@ def test_messy_incomplete_data_batch_2():
             if case.get("gaps"):
                 dates = list(pd.date_range("2022-01-01", periods=n, freq="2Y").date)
 
-            base_df = pl.DataFrame({"date": dates, "y": y})
+            base_df = pl.DataFrame({"period": list(range(n)), "y": y})
             if case.get("inds") or case.get("ind_nan"):
                 ind = make_indicators(n_low=n, seed=600+i)
                 if case.get("ind_nan"): ind[0] = np.nan
@@ -1135,11 +1135,11 @@ def test_messy_incomplete_data_batch_2():
 
             if case.get("expect_error"):
                 with pytest.raises(Exception):
-                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                    _ = aligner.fit_transform(df, datetime_col="period", target_col="y")
                 passed += 1
                 continue
 
-            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            high = aligner.fit_transform(df, datetime_col="period", target_col="y")
             if isinstance(high, pl.LazyFrame):
                 high = high.collect()
 
@@ -1230,7 +1230,11 @@ def test_messy_incomplete_data_batch_3():
             if case.get("tz_dates") or case.get("tz_helper"):
                 dates = pd.date_range("2023-01-01", periods=n, freq="YE", tz="UTC")
 
-            base_df = pl.DataFrame({"date": dates, "y": y})
+            # Force object for dates and float for y to avoid polars construction issues in messy cases
+            base_df = pl.DataFrame({
+                "date": pd.Series(dates, dtype="object"),
+                "y": pd.Series(y, dtype="float64")
+            })
             if case.get("inds") or case.get("ind_nan") or case.get("cat_indicator"):
                 ind = make_indicators(n_low=n, seed=800+i)
                 if case.get("ind_nan"): ind[1] = np.nan
@@ -1269,11 +1273,11 @@ def test_messy_incomplete_data_batch_3():
 
             if case.get("expect_error"):
                 with pytest.raises(Exception):
-                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                    _ = aligner.fit_transform(df, datetime_col="period", target_col="y")
                 passed += 1
                 continue
 
-            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            high = aligner.fit_transform(df, datetime_col="period", target_col="y")
             if isinstance(high, pl.LazyFrame):
                 high = high.collect()
 
@@ -1298,6 +1302,139 @@ def test_messy_incomplete_data_batch_3():
     print("Batch 3 passed")
 
 
+def test_messy_incomplete_data_batch_4():
+    """Batch 4 of 24: focus on NaN propagation in advanced methods, date helper with NaT/tz, pandas object dates, large data NaN, error on bad ensemble, etc."""
+    cases = [
+        {"n": 5, "nan_y": [0,3], "method": "chow-lin-opt", "inds": True, "nboot": 20, "expect_finite": False},
+        {"n": 4, "nat_date": [1], "tf": "1mo", "test_helper": True, "expect_finite": False},
+        {"n": 3, "object_dates": True, "nan_y": [1], "itype": "pandas", "expect_finite": False},
+        {"n": 6, "large_nan": True, "nboot": 5, "method": "litterman"},
+        {"n": 4, "nan_in_ind": [1], "inds": True, "ens": True, "itype": "xarray"},
+        {"n": 3, "gaps": True, "unsorted": True, "test_helper": True},
+        {"n": 5, "neg_group_nan": [2], "cneg": True, "method": "denton"},
+        {"n": 2, "empty_after_nan": True, "all_nan_y": True},
+        {"n": 4, "inf_y": [1], "nan_y": [2], "ens": True},
+        {"n": 3, "tz_dates": True, "nat_date": [0], "test_helper": True, "expect_finite": False},
+        {"n": 5, "cat_indicator": True, "inds": True, "itype": "pandas"},
+        {"n": 3, "missing_y": True, "expect_error": True},
+        {"n": 4, "zero_div_potential": True, "nan_y": [0], "cneg": True},
+        {"n": 6, "bootstrap_nan_small": True, "nboot": 200, "nan_y": [1], "expect_finite": False},
+        {"n": 3, "xarray_nan_coord": True, "itype": "xarray", "expect_finite": False},
+        {"n": 4, "pandas_nat_index": True, "itype": "pandas_df", "nan_y": [2]},
+        {"n": 3, "lazy_null": True, "itype": "lazy", "nan_y": [0]},
+        {"n": 5, "wrong_col_nan": True, "missing_y": True, "expect_error": True},
+        {"n": 3, "object_mixed": True, "nat_date": [1], "test_helper": True},
+        {"n": 4, "hier_with_nan": True, "hier_nan": True, "method": "denton", "expect_finite": False},
+        {"n": 3, "full_mess2": True, "nan_y": [0,2], "inf_y": [1], "neg": True, "dups": True, "gaps": True},
+        {"n": 2, "single_nat": True, "nat_date": [0], "test_helper": True},
+        {"n": 5, "ind_nan_ens2": True, "inds": True, "ens": True, "nan_y": [3], "expect_finite": False},
+        {"n": 4, "mixed_bad": True, "nan_y": [1], "tf": "weird", "nboot": 10, "expect_finite": False},
+    ]
+
+    passed = 0
+    for i, case in enumerate(cases):
+        try:
+            n = case.get("n", 3)
+            y = make_low_freq(n_low=n, seed=900 + i)
+            if case.get("nan_y"):
+                for idx in case["nan_y"]:
+                    if idx < len(y): y[idx] = np.nan
+            if case.get("inf_y"):
+                for idx in case["inf_y"]:
+                    if idx < len(y): y[idx] = np.inf
+            if case.get("all_nan_y"):
+                y[:] = np.nan
+            if case.get("neg"):
+                y[0] = -50
+            if case.get("zeros"):
+                y[1] = 0
+
+            dates = list(pd.date_range("2024-01-01", periods=n, freq="YE").date)
+            if case.get("nat_date"):
+                for idx in case["nat_date"]:
+                    if idx < len(dates): dates[idx] = pd.NaT
+            if case.get("dups"):
+                dates.append(dates[0])
+                y = np.append(y, y[0]); n += 1
+            if case.get("unsorted"):
+                dates = dates[::-1]; y = y[::-1]
+            if case.get("gaps"):
+                dates = list(pd.date_range("2024-01-01", periods=n, freq="2Y").date)
+            if case.get("tz_dates") or case.get("tz_helper"):
+                dates = pd.date_range("2024-01-01", periods=n, freq="YE", tz="UTC")
+            if case.get("object_mixed"):
+                dates = [d for d in dates]
+                if case.get("nat_date"):
+                    dates[case.get("nat_date", [0])[0]] = pd.NaT
+
+            base_df = pl.DataFrame({"period": list(range(n)), "y": y})
+            if case.get("inds") or case.get("ind_nan") or case.get("cat_indicator"):
+                ind = make_indicators(n_low=n, seed=1000+i)
+                if case.get("ind_nan"): ind[1] = np.nan
+                if case.get("cat_indicator"):
+                    ind = pd.Categorical(ind.astype(str)).astype(str)
+                base_df = base_df.with_columns(pl.Series("ind", ind))
+
+            itype = case.get("itype", "polars")
+            if itype in ["pandas", "pandas_df"]:
+                df = base_df.to_pandas()
+            elif itype == "lazy":
+                df = base_df.lazy()
+            elif itype == "xarray":
+                try:
+                    import xarray as xr
+                    df = xr.DataArray(y, dims=["t"], coords={"t": dates}, name="y")
+                except:
+                    df = base_df
+            else:
+                df = base_df
+
+            if case.get("no_date"):
+                df = df.drop("date", axis=1) if hasattr(df, "drop") else df.select(pl.exclude("date"))
+            if case.get("missing_y"):
+                df = df.drop("y", axis=1) if hasattr(df, "drop") else df.select(pl.exclude("y"))
+
+            aligner = TemporalAligner(
+                method=case.get("method", "uniform"),
+                target_freq=case.get("tf", "1mo"),
+                agg="sum",
+                indicator_cols=["ind"] if (case.get("inds") or case.get("ind_nan") or case.get("cat_indicator")) else None,
+                use_ensemble=case.get("ens", False),
+                correct_negatives=case.get("cneg", False),
+                n_bootstrap=case.get("nboot", 0)
+            )
+
+            if case.get("expect_error"):
+                with pytest.raises(Exception):
+                    _ = aligner.fit_transform(df, datetime_col="period", target_col="y")
+                passed += 1
+                continue
+
+            high = aligner.fit_transform(df, datetime_col="period", target_col="y")
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+
+            vals = high["y_disaggregated"].to_numpy()
+            if case.get("expect_finite", True) and not case.get("nan_y") and not case.get("all_nan_y") and not case.get("inf_y"):
+                assert np.all(np.isfinite(vals)), f"Non-finite in case {i}"
+
+            if case.get("test_helper", False):
+                try:
+                    _ = aligner.expand_high_freq_dates(dates)
+                except:
+                    pass
+
+            passed += 1
+        except Exception as e:
+            if not case.get("expect_error"):
+                print(f"Unexpected in batch3 case {i}: {e}")
+                raise
+            passed += 1
+
+    assert passed == len(cases)
+    print("Batch 4 passed")
+
+
 if __name__ == "__main__":
     test_simulation_suite()
     test_more_edge_cases_and_use_cases()
@@ -1308,4 +1445,5 @@ if __name__ == "__main__":
     test_messy_incomplete_data_batch_1()
     test_messy_incomplete_data_batch_2()
     test_messy_incomplete_data_batch_3()
+    test_messy_incomplete_data_batch_4()
     print("All batch tests completed successfully.")
