@@ -5,6 +5,17 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-07-07
+
+### Fixed
+- **Regression (include_dates)**: `expand_high_freq_dates` (and thus `disaggregate_columns(..., include_dates=True)`) now reliably expands to distinct high-frequency dates (e.g. 47 quarters → 141 unique monthly pl.Date). The pandas path is hardened and a pure-Python calendar stepper ensures the repeat-low fallback is never taken for dates. Updated docstring example (fit_transform does not emit a date column).
+- **Missing public API**: `extrapolate` is now accepted on `fit_transform(..., extrapolate=...)` and `disaggregate_columns(..., extrapolate=...)` (forwarded with per-call override/restore). All four policies run and produce distinct length/value behavior.
+- **Dangerous default (NaN inputs)**: Default `extrapolate="nan"` (was "hold"). NaN low-freq input values now produce honest NaN in the corresponding high-freq output months by default — the library no longer silently fabricates data for unreported periods. `extrapolate="hold"`/`"linear"` will fill when explicitly requested. `"drop"` shortens output by truncating after the last valid anchor. Warnings now specifically call out "NaN-input periods".
+- Updated related tests, README, and docstrings. Existing behavior for fully-observed series is unchanged.
+
+### Changed
+- Default for `TemporalAligner(extrapolate=...)` is now `"nan"`.
+
 ## [1.4.0] - 2026-07-07
 
 ### Added

@@ -294,18 +294,46 @@ def test_legacy_api_more_paths():
 
 # --- Regression tests for first-time user quarterly Excel bugs (1.4.0) ---
 
-def test_disaggregate_columns_no_silent_nan_tail_default_hold():
-    # synthetic N=3 quarters, last y NaN -> with default hold, no NaN in output, warning issued
+def test_disaggregate_columns_default_nan_for_missing_input_quarters():
+    # 1.4.1: default (extrapolate="nan") must leave NaN for low-freq NaN inputs (no silent fabrication)
+    # even though init default was "hold" before; now honest + specific warning
     df = pl.DataFrame({
         "date": [date(2020,1,1), date(2020,4,1), date(2020,7,1)],
         "stock": [1000., 1200., float("nan")],
     })
     aligner = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
-    with pytest.warns(UserWarning, match="NaN values present"):
+    with pytest.warns(UserWarning, match="NaN-input periods"):
         monthly = aligner.disaggregate_columns(df, datetime_col="date", include_dates=True)
     assert len(monthly) == 9
-    assert monthly["stock"].is_nan().sum() == 0  # held, no loss of final
+    assert monthly["stock"].is_nan().sum() == 3  # last quarter's months honest NaN
     assert monthly.schema["date"] == pl.Date
+    # tail of last 3 months are nan
+    assert np.all(np.isnan(monthly["stock"].tail(3).to_numpy()))
+
+def test_extrapolate_hold_fills_nan_input_blocks():
+    # explicit hold still fills (even nan-input) for users who want it
+    # use agg="last" (stock-like) so hold value matches the low anchor level
+    df = pl.DataFrame({
+        "date": [date(2020,1,1), date(2020,4,1), date(2020,7,1)],
+        "val": [1000., 1200., float("nan")],
+    })
+    aligner = TemporalAligner(method="linear", target_freq="1mo", agg="last")
+    monthly = aligner.disaggregate_columns(df, datetime_col="date", include_dates=True, extrapolate="hold")
+    assert monthly["val"].is_nan().sum() == 0
+    # the filled months should match the last value from the prior valid block
+    filled = monthly["val"].tail(3).to_list()
+    prev_last = monthly["val"][5]
+    assert all(abs(v - prev_last) < 1e-6 for v in filled)
+
+def test_extrapolate_drop_shortens_output():
+    df = pl.DataFrame({
+        "date": [date(2020,1,1), date(2020,4,1), date(2020,7,1)],
+        "val": [1000., 1200., float("nan")],
+    })
+    aligner = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+    monthly = aligner.disaggregate_columns(df, datetime_col="date", include_dates=True, extrapolate="drop")
+    assert len(monthly) == 6  # dropped last quarter's 3 months
+    assert not monthly["val"].is_nan().any()
 
 
 @pytest.mark.parametrize("method", ["uniform", "linear", "denton", "denton-cholette"])
@@ -383,4 +411,50 @@ def test_install_note_and_excel_extra():
     assert "excel" in extras
     assert any("fastexcel" in e or "openpyxl" in e for e in extras["excel"])
     # version req in classifiers or readme, assumed documented
+
+
+# --- 1.4.1 regression tests (live PyPI feedback) ---
+
+def test_141_include_dates_expands_to_distinct_monthly_pl_Date():
+    # ISSUE 1: include_dates must expand (not stamp repeated low dates); always pl.Date + distinct
+    n_q = 5
+    dates = pd.date_range("2015-01-01", periods=n_q, freq="QS").date.tolist()
+    df = pl.DataFrame({"date": dates, "y": list(range(n_q))})
+    a = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+    m = a.disaggregate_columns(df, datetime_col="date", include_dates=True)
+    d = m["date"]
+    assert d.dtype == pl.Date
+    assert d.n_unique() == m.height
+    assert d.is_sorted()
+    min_diff = d.diff().drop_nulls().dt.total_days().min()
+    assert min_diff is not None and min_diff >= 28
+
+def test_141_extrapolate_param_accepted_on_both_public_methods():
+    # ISSUE 2: no more TypeError; all 4 policies accepted on fit_transform and disagg
+    df = pl.DataFrame({
+        "date": [date(2020,1,1), date(2020,4,1)],
+        "y": [100., 200.],
+    })
+    a = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+    for pol in ["hold", "linear", "drop", "nan"]:
+        # should not raise
+        _ = a.fit_transform(df, datetime_col="date", target_col="y", extrapolate=pol)
+        _ = a.disaggregate_columns(df, datetime_col="date", include_dates=True, extrapolate=pol)
+
+def test_141_default_leaves_nan_input_quarters_as_nan_not_fabricated():
+    # ISSUE 3 + acceptance: default must NOT fabricate for NaN low quarters (2 quarters -> 6 months nan)
+    # warning must mention NaN-input
+    import numpy as np
+    n_q = 5
+    dates = pd.date_range("2015-01-01", periods=n_q, freq="QS").date.tolist()
+    vals = [10., 20., 30., float("nan"), float("nan")]
+    df = pl.DataFrame({"date": dates, "mortgage": vals})
+    a = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+    with pytest.warns(UserWarning, match="NaN-input"):
+        m = a.disaggregate_columns(df, datetime_col="date", include_dates=True)
+    tail6 = m["mortgage"].to_numpy()[-6:]
+    assert np.isnan(tail6).all()
+    assert m.height == 15
+    d = m["date"]
+    assert d.dtype == pl.Date and d.n_unique() == 15
 

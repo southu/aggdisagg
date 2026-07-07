@@ -126,6 +126,7 @@ print("Sums match original quarters:",
 - Date inference now correctly chooses a ratio of 3 for quarterly → monthly (instead of assuming annual).
 - Use `include_dates=True` for a ready-to-use monthly date column, or call `expand_high_freq_dates` yourself for custom alignment.
 - All series are disaggregated independently but share the same frequency mapping.
+- New in 1.4.1: `extrapolate` ("nan" default) controls NaN low-freq input handling. "nan" (default) and "drop" never fabricate values from missing inputs; "hold"/"linear" fill using last anchor when requested. Pass on `fit_transform(..., extrapolate=...)` or `disaggregate_columns(...)`.
 
 See `examples/quickstart.py` for more patterns.
 
@@ -151,10 +152,10 @@ back = aligner.aggregate(high, freq="1y")   # should match original low almost e
 The returned DataFrame contains `y_disaggregated` (and `y_std` when uncertainty was computed). Original context columns are **not** automatically repeated (this was changed for robustness across Polars/pandas/object dates). You can expand dates yourself:
 
 ```python
-# Example: turn repeated yearly dates into proper monthly
-high = high.with_columns(
-    pl.date_range(high["date"].min(), high["date"].max(), "1mo", eager=True).alias("date")
-)
+# Example: attach proper high-freq dates (fit_transform itself returns only values)
+low_dates = low_df["date"]
+high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
+high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date"))
 ```
 
 **Limitations (as of 1.1.0)**

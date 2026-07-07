@@ -200,7 +200,7 @@ class TemporalAligner:
         correct_negatives: bool = True,
         use_ensemble: bool = False,
         n_bootstrap: int = 100,
-        extrapolate: Literal["nan", "hold", "linear", "drop"] = "hold",
+        extrapolate: Literal["nan", "hold", "linear", "drop"] = "nan",
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
         autodetect_semantics: bool = True,
@@ -516,13 +516,29 @@ class TemporalAligner:
         elif self.method == "linear":
             x = np.arange(len(y_low))
             x_new = np.linspace(0, len(y_low)-1, n_high)
-            yh = np.interp(x_new, x, y_low)
+            # Bridge NaNs with last valid *only* for interp to avoid np.interp leaking NaN into prior valid blocks;
+            # then force NaN on the original nan-low blocks so missing inputs stay honest (or get filled by policy later).
+            y_low_for_ip = np.asarray(y_low, dtype=float).copy()
+            last = np.nan
+            for i in range(len(y_low_for_ip)):
+                if np.isfinite(y_low_for_ip[i]):
+                    last = y_low_for_ip[i]
+                elif np.isfinite(last):
+                    y_low_for_ip[i] = last
+            yh = np.interp(x_new, x, y_low_for_ip)
+            n_l = len(y_low)
+            r = n_high // n_l if n_l else 1
+            for i in range(n_l):
+                if not np.isfinite(y_low[i]):
+                    yh[i * r : (i + 1) * r] = np.nan
             if self.agg == "sum":
-                s = yh.sum()
-                yh = yh * (y_low.sum() / s) if s != 0 and np.isfinite(s) else yh
+                s = np.nansum(yh)
+                target = np.nansum(y_low)
+                yh = yh * (target / s) if s != 0 and np.isfinite(s) else yh
             elif self.agg == "mean":
-                m = yh.mean()
-                yh = yh * (y_low.mean() / m) if m != 0 and np.isfinite(m) else yh
+                m = np.nanmean(yh)
+                target_m = np.nanmean(y_low)
+                yh = yh * (target_m / m) if m != 0 and np.isfinite(m) else yh
             return yh
         return np.repeat(y_low, n_high // len(y_low))
 
@@ -576,7 +592,37 @@ class TemporalAligner:
             y_h = self._apply_simple(y_low, self._n_high)
         return pl.DataFrame({"y_disaggregated": y_h})
 
-    def fit_transform(self, df: pl.DataFrame | pl.LazyFrame | Any, datetime_col: str = "date", target_col: str = "y") -> pl.DataFrame | pl.LazyFrame:
+    def fit_transform(
+        self,
+        df: pl.DataFrame | pl.LazyFrame | Any,
+        datetime_col: str = "date",
+        target_col: str = "y",
+        extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        """Fit and return the disaggregated high-frequency series.
+
+        Parameters
+        ----------
+        df : DataFrame-like
+            Low-frequency data with datetime and target column.
+        datetime_col : str
+            Name of datetime column.
+        target_col : str
+            Name of value column to disaggregate.
+        extrapolate : {"nan", "hold", "linear", "drop"} or None
+            Policy for high-freq periods whose low-freq anchor was NaN (missing/unreported)
+            or beyond last valid anchor. Default (None) uses the instance setting (now "nan").
+            - "nan": leave NaN (honest for missing inputs)
+            - "hold": fill with last valid observed value (for NaN-input blocks or end)
+            - "linear": linear extend from last slope
+            - "drop": truncate output to drop periods originating from NaN low-freq inputs (shortens)
+
+        Returns
+        -------
+        pl.DataFrame (or LazyFrame)
+            Column "y_disaggregated" (optionally + "y_std"), length usually n_low * ratio
+            (may be shorter if extrapolate="drop").
+        """
         # Support lazy: collect for heavy ops
         is_lazy = isinstance(df, pl.LazyFrame)
         if is_lazy:
@@ -597,130 +643,157 @@ class TemporalAligner:
                     df = pl.from_pandas(pd.DataFrame({"t": range(len(df)), "y": np.asarray(df)}))
             datetime_col = df.columns[0]  # assume first is time
 
-        self.fit(df, datetime_col, target_col)
-        y_low = self._low_y
-        n_low = self._n_low or 0
-        n_high = getattr(self, "_n_high", 0) or 0
-        ratio = n_high // n_low if n_low else 0
-        if n_low == 0:
-            # early return clean empty for zero-length input
-            high_df = pl.DataFrame({"y_disaggregated": np.array([], dtype=float)})
+        # allow per-call override without mutating instance permanently
+        orig_extrap = self.extrapolate
+        if extrapolate is not None:
+            self.extrapolate = extrapolate
+
+        try:
+            self.fit(df, datetime_col, target_col)
+            y_low = self._low_y
+            n_low = self._n_low or 0
+            n_high = getattr(self, "_n_high", 0) or 0
+            ratio = n_high // n_low if n_low else 0
+            if n_low == 0:
+                # early return clean empty for zero-length input
+                high_df = pl.DataFrame({"y_disaggregated": np.array([], dtype=float)})
+                if is_lazy:
+                    high_df = high_df.lazy()
+                return high_df
+
+            # Collect predictions from methods for ensemble if requested
+            predictions = []
+            base_methods = [self.method]
+            if self.use_ensemble:
+                base_methods = ["uniform", "linear", "denton", self.method]
+
+            for m in base_methods:
+                orig_method = self.method
+                self.method = m
+                if m in ("uniform", "linear"):
+                    yh = self._apply_simple(y_low, self._n_high)
+                elif m.startswith("denton"):
+                    yh = self._apply_denton(y_low)
+                else:
+                    _stored = getattr(self, '_y_high', None)
+                    yh = self._apply_simple(y_low, self._n_high) if _stored is None else _stored
+                predictions.append(yh)
+                self.method = orig_method  # restore
+
+            if self.use_ensemble and len(predictions) > 1:
+                y_h = _ensemble_nnls(predictions, self._C, y_low)
+                self._methods_used = base_methods
+            else:
+                y_h = predictions[0]
+
+            # Ensure exact aggregation (nan/inf safe for messy data cases)
+            if self._C is not None:
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    # Use nan_to_num to prevent NaN pollution in groups that have NaN in their block
+                    # (0 * NaN = NaN in float, which would make whole current NaN and break scaling for valid groups)
+                    y_h_for_current = np.nan_to_num(y_h, copy=True, nan=0.0)
+                    current = self._C @ y_h_for_current
+                    factor = np.ones_like(current, dtype=float)
+                    mask = np.abs(current) > 1e-12
+                    safe = mask & np.isfinite(current) & np.isfinite(y_low)
+                    factor[safe] = y_low[safe] / current[safe]
+                    y_h = y_h * np.repeat(factor, ratio)
+
+            # Handle NaNs: distinguish NaN low-freq *input* (no anchor -> default honest NaN) vs genuine end-of-range.
+            # extrapolate policy now defaults to "nan" (design fix); "hold"/"linear" fill when requested (incl. for missing inputs);
+            # "drop" shortens by truncating after last valid.
+            had_nan = np.any(np.isnan(y_h))
+            if had_nan or np.any(~np.isfinite(y_low)):
+                # map which high blocks come from NaN low inputs (reserved for future diagnostics)
+                if n_low > 0 and ratio > 0:
+                    low_nan = ~np.isfinite(y_low)
+                    _ = np.repeat(low_nan, ratio)  # computed for potential use / clarity
+                # (no else needed)
+
+                if self.extrapolate == "hold":
+                    finite_idx = np.where(np.isfinite(y_h))[0]
+                    if len(finite_idx) > 0:
+                        last_finite = finite_idx[-1]
+                        last_val = y_h[last_finite]
+                        # fill NaNs (incl those from input-nan blocks when explicitly "hold")
+                        to_fill = np.isnan(y_h) & (np.arange(len(y_h)) > last_finite)
+                        y_h[to_fill] = last_val
+                elif self.extrapolate == "linear":
+                    finite_idx = np.where(np.isfinite(y_h))[0]
+                    if len(finite_idx) >= 2:
+                        last2 = finite_idx[-2:]
+                        slope = (y_h[last2[1]] - y_h[last2[0]]) / max(1, (last2[1] - last2[0]))
+                        for j in range(last2[1] + 1, len(y_h)):
+                            if np.isnan(y_h[j]):
+                                y_h[j] = y_h[j - 1] + slope
+                # "nan" and "drop" leave NaNs for now (drop truncates below)
+
+            if had_nan:
+                import warnings
+                msg = (
+                    "NaN values present in disaggregated series for one or more high-frequency periods "
+                    "(caused by NaN in corresponding low-frequency input values or end-of-range). "
+                    f"Current extrapolate={self.extrapolate!r}. "
+                    "Default 'nan' leaves NaN-input periods honest (no fabrication); "
+                    "use 'hold'/'linear' to fill or 'drop' to shorten."
+                )
+                warnings.warn(msg, UserWarning, stacklevel=2)
+
+            # Negative correction
+            if self.correct_negatives:
+                y_h = _correct_negatives(y_h, self._C, y_low)
+
+            # Apply drop (shorten) *after* corrections; truncate to last finite (drops NaN-input trailing periods)
+            if self.extrapolate == "drop" and len(y_h) > 0:
+                finite_idx = np.where(np.isfinite(y_h))[0]
+                if len(finite_idx) > 0:
+                    keep = finite_idx[-1] + 1
+                    y_h = y_h[:keep].copy()
+                else:
+                    y_h = np.array([], dtype=float)
+
+            self._y_high = y_h
+            self._n_high = len(y_h)
+
+            # Uncertainty (simple bootstrap + analytic for regression)
+            if self.n_bootstrap > 0:
+                try:
+                    xh = self._X_high if self._X_high is not None else np.ones((self._n_high, 1))
+
+                    def _bs_method(yl_res: np.ndarray, xh_res: np.ndarray) -> np.ndarray:
+                        """Re-apply the current method to resampled low-freq for better variation."""
+                        m = self.method
+                        if m in ("uniform", "linear"):
+                            return self._apply_simple(yl_res, self._n_high)
+                        elif m.startswith("denton"):
+                            return self._apply_denton(yl_res)
+                        else:
+                            # For chow-lin etc, re-running full GLS on resample is complex.
+                            # Use original + small relative noise so std is not zero.
+                            base = y_h
+                            noise = np.random.default_rng(42).normal(0, np.std(base) * 0.05, len(base))
+                            return base + noise
+
+                    _mean_pred, std_err = _bootstrap_uncertainty(y_low, xh, _bs_method, self.n_bootstrap)
+                    self._std_errors = std_err
+                except Exception:  # pragma: no cover
+                    self._std_errors = np.zeros_like(y_h)
+
+            # Build output DataFrame with the disaggregated series (and std if available).
+            # We return a clean result rather than repeating original context columns.
+            # This avoids dtype/repeat_by limitations and pandas rebinding issues inside fit.
+            # Callers who need repeated context columns can expand them manually.
+            high_df = pl.DataFrame({"y_disaggregated": y_h})
+            if self._std_errors is not None:
+                with contextlib.suppress(Exception):  # pragma: no cover
+                    high_df = high_df.with_columns(pl.Series(name="y_std", values=self._std_errors))
+
             if is_lazy:
                 high_df = high_df.lazy()
             return high_df
-
-        # Collect predictions from methods for ensemble if requested
-        predictions = []
-        base_methods = [self.method]
-        if self.use_ensemble:
-            base_methods = ["uniform", "linear", "denton", self.method]
-
-        for m in base_methods:
-            orig_method = self.method
-            self.method = m
-            if m in ("uniform", "linear"):
-                yh = self._apply_simple(y_low, self._n_high)
-            elif m.startswith("denton"):
-                yh = self._apply_denton(y_low)
-            else:
-                _stored = getattr(self, '_y_high', None)
-                yh = self._apply_simple(y_low, self._n_high) if _stored is None else _stored
-            predictions.append(yh)
-            self.method = orig_method  # restore
-
-        if self.use_ensemble and len(predictions) > 1:
-            y_h = _ensemble_nnls(predictions, self._C, y_low)
-            self._methods_used = base_methods
-        else:
-            y_h = predictions[0]
-
-        # Ensure exact aggregation (nan/inf safe for messy data cases)
-        if self._C is not None:
-            with np.errstate(invalid="ignore", divide="ignore"):
-                # Use nan_to_num to prevent NaN pollution in groups that have NaN in their block
-                # (0 * NaN = NaN in float, which would make whole current NaN and break scaling for valid groups)
-                y_h_for_current = np.nan_to_num(y_h, copy=True, nan=0.0)
-                current = self._C @ y_h_for_current
-                factor = np.ones_like(current, dtype=float)
-                mask = np.abs(current) > 1e-12
-                safe = mask & np.isfinite(current) & np.isfinite(y_low)
-                factor[safe] = y_low[safe] / current[safe]
-                y_h = y_h * np.repeat(factor, ratio)
-
-        # Handle NaNs from NaN in low-freq anchors or end-of-range using extrapolate policy
-        # This prevents silent data loss for the final period(s) under default "hold"
-        had_nan = np.any(np.isnan(y_h))
-        if had_nan:
-            if self.extrapolate == "hold":
-                finite_idx = np.where(np.isfinite(y_h))[0]
-                if len(finite_idx) > 0:
-                    last_finite = finite_idx[-1]
-                    last_val = y_h[last_finite]
-                    to_fill = np.isnan(y_h) & (np.arange(len(y_h)) > last_finite)
-                    y_h[to_fill] = last_val
-            elif self.extrapolate == "linear":
-                # simple extend last slope for trailing
-                finite_idx = np.where(np.isfinite(y_h))[0]
-                if len(finite_idx) >= 2:
-                    last2 = finite_idx[-2:]
-                    slope = (y_h[last2[1]] - y_h[last2[0]]) / (last2[1] - last2[0])
-                    for j in range(last2[1]+1, len(y_h)):
-                        if np.isnan(y_h[j]):
-                            y_h[j] = y_h[j-1] + slope
-            # for "drop" and "nan" leave as-is (may have NaN)
-
-        if had_nan:
-            import warnings
-            warnings.warn(
-                "NaN values present in disaggregated series for one or more high-frequency periods "
-                "(caused by NaN in corresponding low-frequency input values or end-of-range). "
-                "Use extrapolate='hold' (default), 'linear', or 'drop' to control behavior.",
-                UserWarning,
-                stacklevel=2,
-            )
-
-        # Negative correction
-        if self.correct_negatives:
-            y_h = _correct_negatives(y_h, self._C, y_low)
-
-        self._y_high = y_h
-
-        # Uncertainty (simple bootstrap + analytic for regression)
-        if self.n_bootstrap > 0:
-            try:
-                xh = self._X_high if self._X_high is not None else np.ones((self._n_high, 1))
-
-                def _bs_method(yl_res: np.ndarray, xh_res: np.ndarray) -> np.ndarray:
-                    """Re-apply the current method to resampled low-freq for better variation."""
-                    m = self.method
-                    if m in ("uniform", "linear"):
-                        return self._apply_simple(yl_res, self._n_high)
-                    elif m.startswith("denton"):
-                        return self._apply_denton(yl_res)
-                    else:
-                        # For chow-lin etc, re-running full GLS on resample is complex.
-                        # Use original + small relative noise so std is not zero.
-                        base = y_h
-                        noise = np.random.default_rng(42).normal(0, np.std(base) * 0.05, len(base))
-                        return base + noise
-
-                _mean_pred, std_err = _bootstrap_uncertainty(y_low, xh, _bs_method, self.n_bootstrap)
-                self._std_errors = std_err
-            except Exception:  # pragma: no cover
-                self._std_errors = np.zeros_like(y_h)
-
-        # Build output DataFrame with the disaggregated series (and std if available).
-        # We return a clean result rather than repeating original context columns.
-        # This avoids dtype/repeat_by limitations and pandas rebinding issues inside fit.
-        # Callers who need repeated context columns can expand them manually.
-        high_df = pl.DataFrame({"y_disaggregated": y_h})
-        if self._std_errors is not None:
-            with contextlib.suppress(Exception):  # pragma: no cover
-                high_df = high_df.with_columns(pl.Series(name="y_std", values=self._std_errors))
-
-        if is_lazy:
-            high_df = high_df.lazy()
-        return high_df
+        finally:
+            # restore any per-call extrapolate override
+            self.extrapolate = orig_extrap
 
     def disaggregate_columns(
         self,
@@ -728,6 +801,7 @@ class TemporalAligner:
         datetime_col: str = "date",
         target_cols: list[str] | None = None,
         include_dates: bool = False,
+        extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
         autodetect_semantics: bool = True,
@@ -754,14 +828,38 @@ class TemporalAligner:
         include_dates : bool, default False
             If True, prepends a 'date' column containing high-frequency dates
             generated via expand_high_freq_dates (starts from the first low date).
+        extrapolate : {"nan", "hold", "linear", "drop"} or None
+            Per-call override for handling of NaN low-freq inputs / end-of-range (see fit_transform).
+            Forwarded to underlying fit_transform calls. "drop" shortens; default "nan" is honest.
         **fit_kwargs
             Passed through to each fit_transform call (e.g. indicator_cols, n_bootstrap).
 
         Returns
         -------
         pl.DataFrame
-            One column per target (column name preserved). Length = n_low * ratio.
-            If include_dates=True, a leading 'date' column is added.
+            One column per target (column name preserved). Length = n_low * ratio
+            (or shorter if extrapolate="drop" used). If include_dates=True, a leading 'date'
+            column (pl.Date, full expansion) is added.
+
+        Examples
+        --------
+        Quarterly to monthly with include_dates (doctest for CI):
+
+        >>> import polars as pl
+        >>> from datetime import date
+        >>> from aggdisagg import TemporalAligner
+        >>> df = pl.DataFrame({
+        ...     "date": [date(2020,1,1), date(2020,4,1), date(2020,7,1)],
+        ...     "sales": [300.0, 330.0, 390.0],
+        ... })
+        >>> a = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+        >>> m = a.disaggregate_columns(df, datetime_col="date", include_dates=True)
+        >>> m.height
+        9
+        >>> m["date"].dtype
+        Date
+        >>> m["date"].n_unique() == m.height
+        True
         """
         # Normalize input to Polars DataFrame for introspection
         if isinstance(df, pl.DataFrame):
@@ -802,8 +900,11 @@ class TemporalAligner:
         # Fit structure once using first (will be overridden per col for agg)
         first_col = target_cols[0]
         first_sub = pdf.select([datetime_col, first_col])
+        ft_kwargs = dict(fit_kwargs)
+        if extrapolate is not None:
+            ft_kwargs["extrapolate"] = extrapolate
         _ = self.fit_transform(
-            first_sub, datetime_col=datetime_col, target_col=first_col, **fit_kwargs
+            first_sub, datetime_col=datetime_col, target_col=first_col, **ft_kwargs
         )
 
         orig_agg = self.agg
@@ -819,7 +920,7 @@ class TemporalAligner:
 
             sub = pdf.select([datetime_col, col])
             high = self.fit_transform(
-                sub, datetime_col=datetime_col, target_col=col, **fit_kwargs
+                sub, datetime_col=datetime_col, target_col=col, **ft_kwargs
             )
             if isinstance(high, pl.LazyFrame):
                 high = high.collect()
@@ -836,6 +937,9 @@ class TemporalAligner:
         if include_dates and getattr(self, "_n_low", 0) > 0:
             low_dates = pdf[datetime_col]
             high_dates = self.expand_high_freq_dates(low_dates)
+            n = out.height
+            if len(high_dates) > n:
+                high_dates = high_dates.slice(0, n)  # accommodate "drop" which shortens
             out = out.with_columns(high_dates.alias("date")).select(["date", *target_cols])
 
         return out
@@ -889,21 +993,24 @@ class TemporalAligner:
     ) -> pl.Series:
         """Expand low-frequency dates into the corresponding high-frequency date range.
 
-        Useful because :meth:`fit_transform` returns the low-frequency dates repeated
-        (for robustness across input types). This helper generates proper high-freq dates.
+        Generates the full sequence of high-frequency dates (e.g. months) for each
+        low-frequency period using the inferred ratio. Always returns pl.Date dtype
+        with distinct timestamps (no stamping of low dates).
 
-        Example:
+        Note: :meth:`fit_transform` returns *only* the value column(s) (no date column).
+        Use ``include_dates=True`` in :meth:`disaggregate_columns`, or expand from the
+        original low-freq dates manually:
+
+            low_dates = low_df["date"]
             high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
-            high = high.with_columns(
-                aligner.expand_high_freq_dates(high["date"]).alias("date")
-            )
+            high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date"))
 
         Args:
-            low_dates: Series or list of low-frequency dates (e.g. yearly).
+            low_dates: Series or list of low-frequency dates (e.g. quarterly starts).
             target_freq: e.g. "1mo", "1q". Defaults to the aligner's target_freq.
 
         Returns:
-            Polars Series of high-frequency dates (length = len(low) * ratio).
+            Polars Series of high-frequency dates (length = len(low) * ratio), dtype=pl.Date.
         """
         if target_freq is None:
             target_freq = self.target_freq or "1mo"
@@ -911,34 +1018,61 @@ class TemporalAligner:
         low = pl.Series(low_dates) if not isinstance(low_dates, pl.Series) else low_dates
         n_low = len(low)
         if n_low == 0:
-            return pl.Series([], dtype=pl.Datetime)
+            return pl.Series([], dtype=pl.Date)
 
         # Use date-aware inference for correct expansion factor (Q->M =3, Y->M=12, etc.)
         ratio = self._infer_ratio(low, target_freq)
+        n_high = n_low * ratio
         tf = (target_freq or self.target_freq or "1mo").lower()
         high_interval = "1mo"
-        if "q" in tf:
-            high_interval = "1mo"
-        elif "d" in tf or "day" in tf:
+        if "d" in tf or "day" in tf:
             high_interval = "1d"
         elif "w" in tf:
-            high_interval = "1w"  # best effort
-        elif "y" in tf:
+            high_interval = "1w"
+        elif "q" in tf or "y" in tf:
             high_interval = "1mo"
 
-        try:
-            start = low[0]
-            # Use pandas for reliable high-freq date generation (common in envs)
-            import pandas as pd
-            start_pd = pd.Timestamp(start) if not isinstance(start, (pd.Timestamp, pd.DatetimeTZDtype)) else start
-            # Map our interval
-            pd_freq = {"1mo": "MS", "1d": "D", "1w": "W"}.get(high_interval, "MS")
-            high_pd = pd.date_range(start=start_pd, periods=n_low * ratio, freq=pd_freq)
-            # Return as native Polars Date (not Object of python dates)
-            return pl.from_pandas(pd.Series(high_pd).to_frame("d"))["d"].cast(pl.Date)
-        except Exception:
-            # Fallback to repeating (same as internal construction)
-            return low.repeat_by(ratio).list.explode(empty_as_null=True)
+        # Preferred: pandas (if present) for calendar-correct month steps etc.
+        if pd is not None:
+            try:
+                start = low[0]
+                start_pd = pd.Timestamp(start) if not isinstance(start, pd.Timestamp) else start
+                pd_freq = {"1mo": "MS", "1d": "D", "1w": "W"}.get(high_interval, "MS")
+                high_pd = pd.date_range(start=start_pd, periods=n_high, freq=pd_freq)
+                s = pl.from_pandas(pd.Series(high_pd).to_frame("_d"))["_d"].cast(pl.Date)
+                if len(s) == n_high:
+                    return s
+            except Exception:
+                pass  # fall through to pure python
+
+        # Pure-python fallback (no pandas, always expands to correct high-freq, never repeats low dates)
+        import calendar as _cal
+        from datetime import date as _date
+        from datetime import timedelta as _td
+        dates_py = []
+        cur = low[0]
+        if not isinstance(cur, _date):
+            try:
+                cur = pd.Timestamp(cur).date() if pd is not None else _date.fromisoformat(str(cur)[:10])
+            except Exception:
+                cur = _date(1970, 1, 1)
+        dates_py.append(cur)
+        for _ in range(1, n_high):
+            if high_interval == "1mo":
+                y, m, d = cur.year, cur.month, cur.day
+                m2 = m + 1
+                y2 = y + (m2 - 1) // 12
+                m2 = ((m2 - 1) % 12) + 1
+                d2 = min(d, _cal.monthrange(y2, m2)[1])
+                cur = _date(y2, m2, d2)
+            elif high_interval == "1d":
+                cur = cur + _td(days=1)
+            elif high_interval == "1w":
+                cur = cur + _td(weeks=1)
+            else:
+                cur = cur + _td(days=28)
+            dates_py.append(cur)
+        return pl.Series(dates_py, dtype=pl.Date)
 
     def predict(self, n_high: int | None = None) -> np.ndarray:
         if hasattr(self, '_y_high') and self._y_high is not None:
