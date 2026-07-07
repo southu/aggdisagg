@@ -5,6 +5,15 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-07-07
+
+### Fixed
+- **aggregate() NaN poisoning (HIGH)**: When the high-frequency result contained any NaN (e.g. honest NaN tail from default `extrapolate="nan"` on unreported final periods), `aggregate()` would return NaN for *every* low-frequency bucket because `C @ y_high` lets NaN (via 0*NaN) propagate to all rows. Now uses per-group reduction: a low group is NaN only if one of *its own* high-freq values is NaN; all other groups return their correct sum/mean/first/last. This restores correct round-tripping for `disaggregate_columns(...)` → `aggregate(...)` on incomplete data.
+  - Updated fallback path in aggregate too.
+  - `drop` mode now also keeps `_n_low` consistent with the shortened output.
+- Added regression test exercising the exact round-trip with trailing NaN low quarters.
+- Repro now yields 44 (or N-2) exact quarters + only the empty ones NaN in re-agg.
+
 ## [1.4.1] - 2026-07-07
 
 ### Fixed

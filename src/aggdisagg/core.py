@@ -98,6 +98,52 @@ def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> 
     return y_high
 
 
+def _aggregate_groups(y_h: np.ndarray, agg: str, n_low: int | None = None) -> np.ndarray:
+    """Per low-frequency group aggregation that is NaN-safe.
+
+    A resulting low value is NaN only if its corresponding high-frequency window
+    contains at least one NaN. Finite groups produce exact aggregates.
+
+    This prevents a single NaN (anywhere) from poisoning the entire output via
+    0 * NaN == NaN in a full C @ y_h matrix multiply.
+    """
+    n_high = len(y_h)
+    if n_high == 0:
+        n_low = n_low or 0
+        return np.full(n_low, np.nan, dtype=float) if n_low else np.array([], dtype=float)
+
+    if n_low is None or n_low <= 0:
+        n_low = 1
+        m = n_high
+    else:
+        m = n_high // n_low
+        if m <= 0:
+            m = 1
+            n_low = n_high
+        elif m * n_low != n_high:
+            # length does not evenly divide the hinted n_low (e.g. dropped trailing groups)
+            # recompute n_low from this m so we cover exactly what high provides
+            n_low = n_high // m
+
+    y_l = np.empty(n_low, dtype=float)
+    for i in range(n_low):
+        g = y_h[i * m : (i + 1) * m]
+        if len(g) == 0 or not np.all(np.isfinite(g)):
+            y_l[i] = np.nan
+        else:
+            if agg == "sum":
+                y_l[i] = g.sum()
+            elif agg in ("mean", "avg"):
+                y_l[i] = g.mean()
+            elif agg == "first":
+                y_l[i] = g[0]
+            elif agg == "last":
+                y_l[i] = g[-1]
+            else:
+                y_l[i] = g.sum()
+    return y_l
+
+
 def _ensemble_nnls(predictions: list[np.ndarray], C: np.ndarray, y_low: np.ndarray) -> np.ndarray:
     """Combine predictions using NNLS to satisfy aggregation."""
     if len(predictions) == 1:
@@ -743,6 +789,11 @@ class TemporalAligner:
             if self.correct_negatives:
                 y_h = _correct_negatives(y_h, self._C, y_low)
 
+            # Capture original sizes before possible drop so we can keep n_low/n_high consistent
+            orig_n_high = getattr(self, "_n_high", len(y_h))
+            orig_n_low = getattr(self, "_n_low", 0)
+            m_for_drop = orig_n_high // orig_n_low if orig_n_low > 0 else 1
+
             # Apply drop (shorten) *after* corrections; truncate to last finite (drops NaN-input trailing periods)
             if self.extrapolate == "drop" and len(y_h) > 0:
                 finite_idx = np.where(np.isfinite(y_h))[0]
@@ -754,6 +805,8 @@ class TemporalAligner:
 
             self._y_high = y_h
             self._n_high = len(y_h)
+            if self.extrapolate == "drop" and orig_n_low > 0 and m_for_drop > 0:
+                self._n_low = self._n_high // m_for_drop if self._n_high > 0 else 0
 
             # Uncertainty (simple bootstrap + analytic for regression)
             if self.n_bootstrap > 0:
@@ -955,19 +1008,26 @@ class TemporalAligner:
             # fallback using inferred ratio (best effort without dates)
             ratio = self._infer_ratio(None, self.target_freq)
             n = len(high_df)
-            n_low = max(1, n // ratio)
+            m = ratio if ratio > 0 else 1
+            n_low = max(1, n // m)
             if target_col in high_df.columns:
-                return pl.DataFrame({f"y_{freq}": high_df[target_col].to_numpy()[:n_low]})
+                y_h = high_df[target_col].to_numpy()
+                y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low)
+                return pl.DataFrame({f"y_{freq}": y_l})
             else:
                 # multi-col: aggregate every numeric column, keep names
                 num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
-                res = {c: high_df[c].to_numpy()[:n_low] for c in num_cols}
+                res = {}
+                for c in num_cols:
+                    y_h = high_df[c].to_numpy()
+                    y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low)
+                    res[c] = y_l
                 return pl.DataFrame(res)
 
         if target_col in high_df.columns:
             y_h = high_df[target_col].to_numpy()
-            with np.errstate(invalid="ignore", divide="ignore"):
-                y_l = self._C @ y_h
+            n_l = getattr(self, "_n_low", 0)
+            y_l = _aggregate_groups(y_h, self.agg, n_l)
             return pl.DataFrame({f"y_{freq}": y_l})
         else:
             # multi-column case: aggregate each numeric column, preserve names
@@ -975,16 +1035,13 @@ class TemporalAligner:
             res = {}
             orig_agg = self.agg
             last_aggs = getattr(self, "_last_disagg_aggs", {})
-            with np.errstate(invalid="ignore", divide="ignore"):
-                for c in num_cols:
-                    agg_c = last_aggs.get(c, self.agg)
-                    self.agg = agg_c
-                    n_h = getattr(self, "_n_high", len(high_df))
-                    n_l = getattr(self, "_n_low", 1)
-                    C_c = _build_c_matrix(n_h, n_l, self.agg)
-                    y_h = high_df[c].to_numpy()
-                    y_l = C_c @ y_h
-                    res[c] = y_l
+            for c in num_cols:
+                agg_c = last_aggs.get(c, self.agg)
+                self.agg = agg_c
+                y_h = high_df[c].to_numpy()
+                n_l = getattr(self, "_n_low", 0)
+                y_l = _aggregate_groups(y_h, agg_c, n_l)
+                res[c] = y_l
             self.agg = orig_agg
             return pl.DataFrame(res)
 

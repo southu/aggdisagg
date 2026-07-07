@@ -393,6 +393,29 @@ def test_aggregate_multi_column_from_disagg_columns():
     assert np.allclose(re["a"].to_numpy(), df["a"].to_numpy())
 
 
+def test_aggregate_preserves_per_group_nan_from_incomplete_tail():
+    # 1.4.2 regression: aggregate() must not NaN-poison *all* low groups when high has NaN tail.
+    # Only the low periods whose high-freq windows contain NaN should be NaN in the re-agg.
+    # This ensures disagg (default nan for missing) + aggregate roundtrip works for partial data.
+    import numpy as np
+    n_q = 5
+    dates = pd.date_range("2015-01-01", periods=n_q, freq="QS").date.tolist()
+    vals = [10., 20., 30., 40., np.nan]  # last quarter unreported -> 3 NaN months
+    df = pl.DataFrame({"date": dates, "val": vals})
+    a = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+    m = a.disaggregate_columns(df, datetime_col="date", include_dates=True)
+    # m should be 15 rows, last 3 NaN
+    assert m.height == 15
+    assert np.isnan(m["val"].to_numpy()[-3:]).all()
+    re = a.aggregate(m.drop("date"), freq="1q")
+    assert len(re) == 5
+    r = re["val"].to_numpy()
+    o = df["val"].to_numpy()
+    finite = ~np.isnan(o)
+    assert np.nanmax(np.abs(r[finite] - o[finite])) < 1e-6   # first 4 quarters exact
+    assert np.isnan(r[~finite]).all()                         # only the last quarter NaN
+
+
 def test_include_dates_returns_pl_Date():
     # BUG5
     df = pl.DataFrame({"date": [date(2020,1,1), date(2020,4,1)], "y": [100., 200.]})
