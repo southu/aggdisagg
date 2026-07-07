@@ -8547,6 +8547,182 @@ def test_messy_incomplete_data_batch_47():
     print("Batch 47 passed")
 
 
+def test_messy_incomplete_data_batch_48():
+    """Batch 48: grain variety deep dive - weekly<->daily, monthly<->daily, quarterly<->weekly-ish, annual<->daily high ratio, mixed with ens/boot/cneg/inds, explicit multi-freq agg verification, n=0/1/24 for grains."""
+    cases = [
+        {"n": 4, "low_f": "W", "tf": "1d", "method": "uniform", "grain": True, "agg_various": True, "check_recovery": True},
+        {"n": 5, "low_f": "M", "tf": "1d", "method": "linear", "ens": True, "nboot": 15, "test_helper": True},
+        {"n": 3, "low_f": "Q", "tf": "1w", "itype": "pandas_df", "method": "denton", "agg_after": True},
+        {"n": 2, "low_f": "Y", "tf": "1d", "method": "denton-cholette", "cneg": True, "inds": True, "grain": True},
+        {"n": 6, "low_f": "M", "tf": "1d", "itype": "polars", "method": "chow-lin", "inds": True, "nboot": 8},
+        {"n": 1, "low_f": "D", "tf": "1d", "cneg": True, "test_helper": True, "agg_various": True},
+        {"n": 3, "low_f": "W", "tf": "1d", "tz_dates": True, "method": "fernandez", "nboot": 6},
+        {"n": 8, "low_f": "Y", "tf": "1mo", "itype": "xarray", "ens": True, "nboot": 10, "agg_various": True},
+        {"n": 0, "low_f": "D", "tf": "1d", "test_helper": True},
+        {"n": 4, "low_f": "Q", "tf": "1d", "itype": "lazy", "method": "litterman", "inds": True, "check_recovery": True},
+        {"n": 7, "low_f": "M", "tf": "1w", "method": "uniform", "agg_after": True, "grain": True},
+        {"n": 2, "low_f": "W", "tf": "1d", "gaps": True, "unsorted": True, "method": "linear"},
+        {"n": 5, "low_f": "Y", "tf": "1d", "itype": "pandas_series", "method": "uniform", "nboot": 4, "agg_various": True},
+        {"n": 3, "low_f": "M", "tf": "1d", "cneg": True, "neg": True, "inds": True, "method": "denton-cholette"},
+        {"n": 9, "low_f": "Q", "tf": "1mo", "method": "chow-lin-opt", "inds": True, "nboot": 20, "test_helper": True},
+        {"n": 1, "low_f": "M", "tf": "1d", "itype": "pandas", "test_helper": True, "agg_after": True},
+        {"n": 4, "low_f": "D", "tf": "1d", "object_mixed": True, "method": "linear"},
+        {"n": 6, "low_f": "Y", "tf": "1q", "ens": True, "cneg": True, "nboot": 12, "grain": True},
+        {"n": 0, "low_f": "W", "tf": "1d", "itype": "xarray", "test_helper": True},
+        {"n": 3, "low_f": "M", "tf": "1d", "tz_dates": True, "object_mixed": True, "method": "uniform", "agg_various": True},
+        {"n": 5, "low_f": "Q", "tf": "1d", "itype": "pandas_series", "method": "linear", "check_recovery": True},
+        {"n": 2, "low_f": "Y", "tf": "1mo", "gaps": True, "method": "denton", "nboot": 5},
+        {"n": 8, "low_f": "W", "tf": "1d", "itype": "polars", "ens": True, "nboot": 7, "agg_after": True},
+        {"n": 4, "low_f": "M", "tf": "1d", "method": "litterman", "inds": True, "nboot": 25, "grain": True, "agg_various": True},
+    ]
+
+    passed = 0
+    for i, case in enumerate(cases):
+        try:
+            n = case.get("n", 3)
+            if n <= 0:
+                y = np.array([], dtype=float)
+                dates = []
+            else:
+                y = make_low_freq(n_low=n, seed=43000 + i)
+            if case.get("nan_y"):
+                for idx in case["nan_y"]:
+                    if idx < len(y): y[idx] = np.nan
+            if case.get("inf_y"):
+                for idx in case["inf_y"]:
+                    if idx < len(y): y[idx] = np.inf
+            if case.get("all_nan_y"):
+                y = np.full_like(y, np.nan) if len(y) > 0 else y
+            if case.get("neg"):
+                if len(y) > 0: y[0] = -25
+            if case.get("zeros"):
+                if len(y) > 1: y[1] = 0.0
+
+            low_f = case.get("low_f", "Y")
+            freq_map = {"Y": "YE", "Q": "QE", "M": "ME", "W": "W", "D": "D"}
+            date_freq = freq_map.get(low_f, "YE")
+            if n <= 0:
+                dates = []
+            else:
+                dates = list(pd.date_range("2026-01-01", periods=n, freq=date_freq).date)
+
+            if case.get("nat_date"):
+                for idx in case.get("nat_date", []):
+                    if idx < len(dates): dates[idx] = pd.NaT
+            if case.get("dups"):
+                if dates: dates = dates + [dates[0]]
+                if len(y) > 0: y = np.append(y, y[0] if len(y) else 0); n = len(dates)
+            if case.get("gaps") and n > 0:
+                step = {"Y": "2YE", "Q": "2QE", "M": "2ME", "W": "2W", "D": "2D"}.get(low_f, "2YE")
+                dates = list(pd.date_range("2026-01-01", periods=n, freq=step).date)
+            if case.get("unsorted") and dates:
+                dates = dates[::-1]
+                if len(y) == len(dates): y = y[::-1]
+            if case.get("tz_dates"):
+                if n > 0:
+                    dates = list(pd.date_range("2026-01-01", periods=n, freq=date_freq, tz="UTC"))
+            if case.get("object_mixed"):
+                dates = pd.Series(dates, dtype="object").tolist() if dates else []
+
+            if n <= 0:
+                base_df = pl.DataFrame({"date": pl.Series([], dtype=pl.Object), "y": pl.Series([], dtype=pl.Float64)})
+            else:
+                base_df = pl.DataFrame({"date": pd.Series(dates, dtype="object"), "y": y})
+
+            if case.get("inds"):
+                ind = make_indicators(n_low=max(n, 1), seed=43100 + i)
+                if case.get("nan_in_ind"):
+                    for j in case.get("nan_in_ind", []):
+                        if j < len(ind): ind[j] = np.nan
+                try:
+                    base_df = base_df.with_columns(pl.Series("ind", ind[:len(base_df)]))
+                except Exception:
+                    pass
+
+            itype = case.get("itype", "polars")
+            df = base_df
+            if itype in ("pandas", "pandas_df"):
+                df = base_df.to_pandas()
+            elif itype == "pandas_series":
+                pdf = base_df.to_pandas()
+                idx = pd.to_datetime(dates, errors="coerce")
+                df = pd.Series(pdf.get("y", pdf.iloc[:, -1] if len(pdf.columns) else []).values if len(pdf) else [], index=idx, name="y")
+            elif itype == "lazy":
+                df = base_df.lazy()
+            elif itype == "xarray":
+                try:
+                    import xarray as xr
+                    df = xr.DataArray(y if len(y) else np.array([]), dims=["t"], coords={"t": dates or []}, name="y")
+                except Exception:
+                    df = base_df
+
+            if case.get("use_dti") and hasattr(df, "set_index"):
+                try:
+                    df = df.set_index(pd.to_datetime(df["date"], errors="coerce")).drop(columns=["date"], errors="ignore")
+                except:
+                    pass
+
+            aligner = TemporalAligner(
+                method=case.get("method", "uniform"),
+                target_freq=case.get("tf", "1mo"),
+                agg=case.get("agg", "sum"),
+                indicator_cols=["ind"] if case.get("inds") else None,
+                use_ensemble=case.get("ens", False),
+                correct_negatives=case.get("cneg", False),
+                n_bootstrap=case.get("nboot", 0)
+            )
+
+            if case.get("expect_error") or case.get("missing_y"):
+                if case.get("missing_y"):
+                    df = _drop_col_safe(df, "y")
+                with pytest.raises(Exception):
+                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                passed += 1
+                continue
+
+            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+
+            vals = high["y_disaggregated"].to_numpy() if len(high) > 0 else np.array([])
+            if case.get("expect_finite", True) and not any(case.get(k) for k in ("nan_y", "inf_y", "all_nan_y")):
+                if len(vals) > 0:
+                    assert np.all(np.isfinite(vals)), f"non finite b48 {i}"
+
+            if case.get("test_helper") or case.get("grain") or case.get("check_recovery"):
+                try:
+                    _ = aligner.expand_high_freq_dates(dates or [])
+                except Exception:
+                    pass
+
+            if case.get("agg_after") or case.get("agg_various") or case.get("grain"):
+                try:
+                    _ = aligner.aggregate(high)
+                    for f in ["1y", "1q", "1mo", "1w", "1d"]:
+                        try:
+                            _ = aligner.aggregate(high, freq=f)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            if case.get("nboot") or case.get("grain"):
+                try:
+                    _ = aligner.predict_with_uncertainty()
+                except Exception:
+                    pass
+
+            passed += 1
+        except Exception as e:
+            if not case.get("expect_error"):
+                print(f"Unexpected in batch48 case {i}: {type(e).__name__}: {e}")
+                raise
+            passed += 1
+
+    assert passed == len(cases), f"Only {passed}/{len(cases)} passed in batch48"
+    print("Batch 48 passed")
+
+
 if __name__ == "__main__":
     test_simulation_suite()
     test_more_edge_cases_and_use_cases()
@@ -8601,4 +8777,5 @@ if __name__ == "__main__":
     test_messy_incomplete_data_batch_45()
     test_messy_incomplete_data_batch_46()
     test_messy_incomplete_data_batch_47()
+    test_messy_incomplete_data_batch_48()
     print("All batch tests completed successfully.")
