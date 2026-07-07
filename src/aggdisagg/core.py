@@ -341,7 +341,7 @@ class TemporalAligner:
         extrapolate: Literal["nan", "hold", "linear", "drop"] = "nan",
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
-        autodetect_semantics: bool = True,
+        autodetect_semantics: bool = False,
         **kwargs,
     ):
         self.method = method.lower()
@@ -513,6 +513,14 @@ class TemporalAligner:
             n = len(low_ts)
             if n == 0:
                 return []
+            # Guard for non-datetime "period" proxies (e.g. range(n) in sims/tests): tiny span or 1970-epoch ns means abstract index, not calendar
+            try:
+                span_days = (low_ts.max() - low_ts.min()).days if n > 1 else 0
+                if span_days < 2 or (getattr(low_ts.min(), "year", 0) == 1970 and span_days < 400):
+                    r = self._infer_ratio(low_dates, target_freq) or self._default_ratio(target_freq)
+                    return [int(r)] * n
+            except Exception:
+                pass
             tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
             # map target to pandas freq code
             if any(x in tf for x in ("d", "day")):
@@ -1074,7 +1082,7 @@ class TemporalAligner:
         extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
-        autodetect_semantics: bool = True,
+        autodetect_semantics: bool = False,
         **fit_kwargs,
     ) -> pl.DataFrame:
         """Disaggregate multiple target columns from one low-frequency DataFrame.
@@ -1223,6 +1231,7 @@ class TemporalAligner:
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
         week_policy: Literal["week_end", "proportional"] = "week_end",
+        autodetect_semantics: bool | None = None,
     ) -> pl.DataFrame:
         """Aggregate high-frequency data to lower frequency with calendar awareness.
 
@@ -1241,12 +1250,17 @@ class TemporalAligner:
         target_col : str
             Legacy single-col name (used only in no-datetime fallback paths).
         col_semantics, default_semantics :
-            Per-column "stock" (use last) or "flow" (sum). Auto-detected if not provided.
+            Per-column "stock" (use last) or "flow" (sum). If autodetect_semantics=True (opt-in),
+            uses heuristic on the series (imperfect for trending positive flows; prefer explicit).
+        autodetect_semantics : bool or None
+            If True, use _detect_semantics heuristic when col not in col_semantics.
+            Default (False) means use default_semantics ("flow") for unspecified cols.
+            Set True explicitly to opt into heuristic (or set on TemporalAligner()).
         week_policy : {"week_end", "proportional"}
             For weekly input to month/quarter/year:
-            - "week_end": assign whole week to the period containing its end date.
-            - "proportional": split flow weeks by overlapping days; stocks use week-end.
-            Other nestings (daily->*, month->q/y, q->y) require no special policy.
+            - "week_end": assign each week's full value once to the (target) period containing its week-end date.
+            - "proportional": split a straddling week's value across periods by day-overlap fraction (fractions sum to 1.0).
+            Stocks always use week-end assignment. Non-straddling nestings (D->*, M->Q/Y etc) need no policy.
 
         Returns
         -------
@@ -1276,7 +1290,10 @@ class TemporalAligner:
                     pos += ll
                 res_dict = {"date": p_dates}
                 res_dict.update(res)
-                return pl.DataFrame(res_dict)
+                out = pl.DataFrame(res_dict)
+                if "date" in out.columns:
+                    out = out.with_columns(pl.col("date").cast(pl.Date))
+                return out
             # legacy name for y_disagg single col
             if list(res.keys()) == ["y_disaggregated"]:
                 return pl.DataFrame({f"y_{freq}": res["y_disaggregated"]})
@@ -1307,26 +1324,66 @@ class TemporalAligner:
                 res = {c: high_df[c].to_numpy()[:n_low] for c in num_cols}
                 return pl.DataFrame(res)
 
-        # --- full calendar-aware path ---
-        pdf = high_df.to_pandas().copy()
-        pdf["_dt"] = pd.to_datetime(pdf[datetime_col])
-        pdf = pdf.sort_values("_dt").reset_index(drop=True)
+        # --- full calendar-aware path (Polars + stdlib only; no pandas/pyarrow required) ---
+        # sort for deterministic period ordering
+        if datetime_col in high_df.columns:
+            high_df = high_df.sort(datetime_col)
 
-        # infer input granularity for span (daily vs weekly etc.)
-        if len(pdf) > 1:
-            deltas = pdf["_dt"].diff().dt.days.dropna()
-            med_delta = deltas.median() if len(deltas) > 0 else 1
-        else:
-            med_delta = 1
-        if med_delta <= 1.5:
-            default_span = 1
-        elif med_delta <= 8:
-            default_span = 7
-        else:
-            default_span = None  # monthly+ ; treat as point at label for assignment
+        # resolve per-col semantics (respect autodetect flag; default False -> "flow")
+        num_cols = [
+            c for c in high_df.columns
+            if c != datetime_col and str(high_df[c].dtype).lower().startswith(("float", "int"))
+        ]
+        eff_map = dict(getattr(self, "col_semantics", {}) or {})
+        if col_semantics:
+            eff_map.update(col_semantics)
+        eff_autodetect = autodetect_semantics if autodetect_semantics is not None else getattr(self, "autodetect_semantics", False)
+        eff_default = default_semantics if default_semantics is not None else getattr(self, "default_semantics", "flow")
+        col_to_sem = {}
+        for c in num_cols:
+            if c in eff_map:
+                col_to_sem[c] = eff_map[c]
+            elif eff_autodetect:
+                y = high_df[c].to_numpy().astype(float)
+                col_to_sem[c] = self._detect_semantics(y)
+            else:
+                col_to_sem[c] = eff_default
+        self._detected_semantics = col_to_sem  # BUG4: expose like disaggregate_columns
 
-        # target pandas period freq
-        f = freq.lower().replace("1", "")
+        # extract dates as python date objects (robust)
+        from datetime import date as _date
+        from datetime import timedelta as _td
+        raw_dts = high_df[datetime_col].to_list()
+        dts: list[_date] = []
+        for d in raw_dts:
+            if isinstance(d, _date):
+                dts.append(d)
+            elif hasattr(d, "date"):  # datetime.datetime etc
+                dts.append(d.date())
+            else:
+                s = str(d)[:10]
+                try:
+                    dts.append(_date.fromisoformat(s))
+                except Exception:
+                    if pd is not None:
+                        try:
+                            dts.append(pd.to_datetime(d).date())
+                        except Exception:
+                            dts.append(_date(1970, 1, 1))
+                    else:
+                        dts.append(_date(1970, 1, 1))
+
+        # infer input granularity (span) from median delta; supports W input for straddles
+        if len(dts) > 1:
+            deltas = [(dts[i] - dts[i-1]).days for i in range(1, len(dts)) if isinstance(dts[i], _date) and isinstance(dts[i-1], _date)]
+            med_delta = float(np.median(deltas)) if deltas else 1.0
+        else:
+            med_delta = 1.0
+        is_week_input = (6.0 <= med_delta <= 8.0)
+        span = 7 if is_week_input else 1
+
+        # map freq to our period key
+        f = freq.lower().replace("1", "").strip()
         if f.startswith("y") or f.startswith("a"):
             pfreq = "Y"
         elif f.startswith("q"):
@@ -1338,82 +1395,100 @@ class TemporalAligner:
         else:
             pfreq = "M"
 
-        # resolve per-col semantics (flow=sum, stock=last)
-        num_cols = [
-            c for c in high_df.columns
-            if c != datetime_col and str(high_df[c].dtype).lower().startswith(("float", "int"))
-        ]
-        eff_map = dict(getattr(self, "col_semantics", {}) or {})
-        if col_semantics:
-            eff_map.update(col_semantics)
-        col_to_sem = {}
-        for c in num_cols:
-            if c in eff_map:
-                col_to_sem[c] = eff_map[c]
-            else:
-                y = high_df[c].to_numpy().astype(float)
-                col_to_sem[c] = self._detect_semantics(y)
+        def _period_start(d: _date, pf: str) -> _date:
+            """Return the start date of the containing target period (calendar)."""
+            if pf == "Y":
+                return _date(d.year, 1, 1)
+            if pf == "Q":
+                qm = ((d.month - 1) // 3) * 3 + 1
+                return _date(d.year, qm, 1)
+            if pf == "M":
+                return _date(d.year, d.month, 1)
+            if pf == "W":
+                wd = d.weekday()  # Mon=0 ... Sun=6 ; matches common weekly starts
+                return d - _td(days=wd)
+            return d
 
-        # accumulate per period
+        # accumulate (fixed logic for mass conservation on weeks)
         from collections import defaultdict
         period_acc: dict = defaultdict(
-            lambda: {c: {"sumv": 0.0, "lastv": None, "has_nan": False} for c in num_cols}
+            lambda: {c: {"sumv": 0.0, "lastv": None, "any_finite": False} for c in num_cols}
         )
-        period_list = []  # ordered periods
-        seen = set()
+        period_list: list[_date] = []
+        seen: set[_date] = set()
 
-        for i in range(len(pdf)):
-            base = pdf["_dt"].iloc[i]
-            vals = {c: pdf[c].iloc[i] for c in num_cols}
-            span = default_span if default_span is not None else 1
-            is_week_input = (span == 7)
+        vals_dict = {c: high_df[c].to_list() for c in num_cols}
 
-            for k in range(span):
-                d = base + pd.Timedelta(days=k)
-                p = d.to_period(pfreq)
-                pkey = str(p)
-                if pkey not in seen:
-                    seen.add(pkey)
+        for i in range(len(dts)):
+            base = dts[i]
+            if not isinstance(base, _date):
+                continue
+            vals = {c: vals_dict[c][i] for c in num_cols}
+            is_w = is_week_input
+            pol = week_policy
+
+            if not is_w or pol != "proportional":
+                # week_end (or any clean nesting): assign *once* to the representative period
+                assign_d = base + _td(days=6) if (is_w and pol == "week_end") else base
+                p = _period_start(assign_d, pfreq)
+                if p not in seen:
+                    seen.add(p)
                     period_list.append(p)
-
                 for c in num_cols:
                     v = vals[c]
-                    is_flow = col_to_sem.get(c, default_semantics) == "flow"
-                    finite = pd.notna(v) and np.isfinite(v)
-                    acc = period_acc[pkey][c]
-                    if not finite:
-                        acc["has_nan"] = True
-                    if is_flow:
-                        # proportional only for week straddles when policy says so
-                        if is_week_input and week_policy == "proportional":
-                            contrib = (v / span) if span > 0 and finite else 0.0
-                            acc["sumv"] += contrib
+                    is_flow = col_to_sem.get(c, eff_default) == "flow"
+                    finite = v is not None and np.isfinite(v)
+                    acc = period_acc[p][c]
+                    if finite:
+                        acc["any_finite"] = True
+                        if is_flow:
+                            acc["sumv"] += float(v)
                         else:
-                            # whole (for clean or week_end policy)
-                            if finite:
-                                acc["sumv"] += v
-                    else:
-                        # stock: assign to end of this high's span
-                        if k == span - 1 and finite:
-                            acc["lastv"] = v
+                            # stock/level: take the value (for week, the week's value assigned to end-bucket)
+                            acc["lastv"] = float(v)
+                    # nan children do not poison sibling finites in same target period (allows mass cons. + partial trailing periods)
+            else:
+                # proportional for flows on week straddles: split by synthetic days, fractions sum==1 per week
+                for k in range(span):
+                    d = base + _td(days=k)
+                    p = _period_start(d, pfreq)
+                    if p not in seen:
+                        seen.add(p)
+                        period_list.append(p)
+                    for c in num_cols:
+                        v = vals[c]
+                        is_flow = col_to_sem.get(c, eff_default) == "flow"
+                        finite = v is not None and np.isfinite(v)
+                        acc = period_acc[p][c]
+                        if finite:
+                            acc["any_finite"] = True
+                            if is_flow:
+                                contrib = (float(v) / span) if (span > 0 and finite) else 0.0
+                                acc["sumv"] += contrib
+                            else:
+                                # stocks: assign-by-week-end even under prop policy
+                                if k == span - 1:
+                                    acc["lastv"] = float(v)
+                        # nans skipped for contrib; period gets value if >=1 finite child
 
-        # build output rows (use period start as the "date")
+        # build output (period start as native pl.Date)
         out_data = []
         for p in period_list:
-            row = {"date": p.start_time.date()}
+            row = {"date": p}
             for c in num_cols:
-                acc = period_acc[str(p)][c]
-                if acc["has_nan"]:
+                acc = period_acc[p][c]
+                if not acc.get("any_finite", False):
                     row[c] = np.nan
-                elif col_to_sem.get(c, default_semantics) == "flow":
+                elif col_to_sem.get(c, eff_default) == "flow":
                     row[c] = acc["sumv"]
                 else:
                     row[c] = acc["lastv"]
             out_data.append(row)
 
         out = pl.DataFrame(out_data)
-        if "date" in out.columns:
+        if out.height > 0 and "date" in out.columns:
             out = out.with_columns(pl.col("date").cast(pl.Date))
+        # ensure date col present even if empty? keep consistent
         return out
 
     def expand_high_freq_dates(

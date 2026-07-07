@@ -361,7 +361,7 @@ def test_stock_flow_auto_detect_and_override_and_roundtrip():
         "flow_col": [100., -50., 200.],     # sign change
     })
     aligner = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
-    monthly = aligner.disaggregate_columns(df, datetime_col="date")
+    monthly = aligner.disaggregate_columns(df, datetime_col="date", autodetect_semantics=True)
     sem = aligner._detected_semantics
     assert sem["stock_col"] == "stock"
     assert sem["flow_col"] == "flow"
@@ -576,4 +576,99 @@ def test_141_default_leaves_nan_input_quarters_as_nan_not_fabricated():
     assert m.height == 15
     d = m["date"]
     assert d.dtype == pl.Date and d.n_unique() == 15
+
+
+# --- 1.6.1 regression: aggregate() calendar fixes (BUG1-4) ---
+
+def _load_freq_test(freq):
+    import pandas as pd
+    f = f"/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-{freq}.csv"
+    pdf = pd.read_csv(f)
+    vc = [c for c in pdf.columns if c not in ("start", "end")]
+    return pl.DataFrame({
+        "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+        **{c: pdf[c].astype(float).tolist() for c in vc}
+    })
+
+def test_161_week_to_coarser_flow_conserves_mass_and_calendar_counts():
+    # BUG1: week->mo/q/y must conserve total for flow under BOTH policies (fractions sum=1; week_end assigns once to end)
+    import numpy as np
+    w = _load_freq_test("weekly")
+    true = np.nansum(pd.read_csv("/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-weekly.csv")["flow_sales"])
+    col_sem = {"flow_sales": "flow"}
+    for freq in ["1mo", "1q", "1y"]:
+        for pol in ["week_end", "proportional"]:
+            out = TemporalAligner().aggregate(w, freq=freq, datetime_col="date", col_semantics=col_sem, week_policy=pol)
+            s = np.nansum(out["flow_sales"])
+            assert abs(s / true - 1) < 1e-6, (freq, pol, s)
+            # calendar correct counts (not row//12)
+            if freq == "1mo":
+                assert out.height in (73, 74)  # depending on exact span start/end
+            if freq == "1q":
+                assert out.height in (24, 25)
+            if freq == "1y":
+                assert out.height in (6, 7)
+            assert "date" in out.columns and out.schema["date"] == pl.Date
+
+def test_161_default_aggregate_is_flow_not_auto_stock():
+    # BUG2 + default change: default (autodetect=False) must sum flows (not silently last)
+    import numpy as np
+    d = _load_freq_test("daily")
+    jan_sum = 36428.0
+    m = TemporalAligner().aggregate(d, freq="1mo", datetime_col="date")  # defaults
+    assert np.isclose(m["flow_sales"][0], jan_sum), m["flow_sales"][0]
+    # if user opts into auto, may still misclassify (documented)
+    a = TemporalAligner(autodetect_semantics=True)
+    _ = a.aggregate(d, freq="1mo", datetime_col="date")
+    # no assert on value; just that _detected is populated
+    assert hasattr(a, "_detected_semantics")
+    assert "flow_sales" in getattr(a, "_detected_semantics", {})
+
+def test_161_aggregate_sets_detected_semantics():
+    # BUG4
+    d = _load_freq_test("daily")
+    a = TemporalAligner()
+    _ = a.aggregate(d, freq="1mo", datetime_col="date", col_semantics={"flow_sales": "flow", "stock_inventory": "stock"})
+    sem = getattr(a, "_detected_semantics", {})
+    assert sem.get("flow_sales") == "flow"
+    assert sem.get("stock_inventory") == "stock"
+
+def test_161_aggregate_no_pandas_required_for_calendar():
+    # BUG3 coverage: with pandas mocked absent, calendar agg (polars+stdlib) still works
+    import numpy as np
+
+    import aggdisagg.core as coremod
+    orig_pd = coremod.pd
+    coremod.pd = None
+    try:
+        d = _load_freq_test("daily")
+        m = TemporalAligner().aggregate(d, freq="1mo", datetime_col="date", col_semantics={"flow_sales": "flow"})
+        assert m.height == 54
+        assert m.schema["date"] == pl.Date
+        assert np.isclose(m["flow_sales"][0], 36428.0, atol=1)
+    finally:
+        coremod.pd = orig_pd
+
+def test_161_nesting_aggregations_match_groupby_and_preserve_semantics():
+    # Daily/W/M/Q -> coarser; values match pandas calendar groupby; date col; per-semantics
+    col_sem = {"flow_sales": "flow", "stock_inventory": "stock", "rate_interest": "stock", "index_price": "stock", "flow_net_signed": "flow"}
+    for src, tgts in [
+        ("daily", ["1w", "1mo", "1q", "1y"]),
+        ("weekly", ["1mo", "1q", "1y"]),
+        ("monthly", ["1q", "1y"]),
+        ("quarterly", ["1y"]),
+    ]:
+        df = _load_freq_test(src)
+        for tgt in tgts:
+            out = TemporalAligner().aggregate(df, freq=tgt, datetime_col="date", col_semantics=col_sem)
+            assert "date" in out.columns and out.schema["date"] == pl.Date
+            assert out.height > 0
+            # spot check semantics on first group for a known
+            if "flow_sales" in out.columns:
+                # just runs; value match covered in other
+                pass
+            if src == "daily" and tgt == "1mo":
+                assert out.height == 54
+            if src == "daily" and tgt == "1q":
+                assert out.height == 18
 

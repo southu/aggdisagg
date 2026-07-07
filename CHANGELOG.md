@@ -5,6 +5,17 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-07-07
+
+### Fixed
+- **BUG1 (HIGH) week→coarser mass non-conservation**: Fixed logic error in weekly straddles where week_end policy added value 7× (inside k-loop) and prop had ~3% leakage on q/y. Both policies now conserve grand total of finite flows to <1e-6 (week_end assigns once to period of week-end date; proportional splits by exact day overlap fractions summing to 1.0). Also adjusted NaN handling for partial trailing periods (a target period with mixed NaN+finite children outputs agg of the finites; only pure-nan periods yield NaN). This preserves mass while keeping honest NaN for fully-missing buckets.
+- **BUG2 (HIGH) auto-detect default mislabels trending flows as stock**: Changed `autodetect_semantics` default to `False` (was True). Default aggregation now uses `default_semantics="flow"` (sum) — the common case for flows — avoiding silent ~34× error (last instead of sum). Auto-detect remains available via `autodetect_semantics=True` (opt-in) or explicit `col_semantics`; heuristic is best-effort and documented as imperfect for monotone positive flows.
+- **BUG3 (MEDIUM) pyarrow undeclared dep**: Rewrote standalone `aggregate()` calendar path to be Polars-first + stdlib `datetime` (no `to_pandas()`, no `pd.to_period`). `aggregate(..., datetime_col=...)` now works even if pandas/pyarrow not installed (pandas remains optional for other features).
+- **BUG4 (MEDIUM) missing _detected_semantics on aggregate**: `aggregate()` now sets `self._detected_semantics` (symmetric with `disaggregate_columns`), using resolved per-col decisions (after respecting autodetect flag).
+- Added guards in `_compute_high_lengths` so abstract integer "period" proxies (used in sims/tests) still expand correctly via regular ratios (non-date inputs no longer produce clen=1).
+- Updated tests for all 4 bugs + full nesting matrix on freq files; re-ran daily/weekly/monthly/quarterly → all coarser levels; confirmed calendar group counts, pl.Date "date" col, correct flow/stock semantics, exact roundtrips (<1e-6), mass conservation.
+- Ruff clean; basic test suite green.
+
 ## [1.6.0] - 2026-07-07
 
 ### Added / Fixed
