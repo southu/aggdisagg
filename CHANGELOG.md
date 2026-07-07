@@ -5,6 +5,16 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-07-07
+
+### Fixed
+- **Regression from 1.6.1 (HIGH)**: Setting `autodetect_semantics=False` by default (and always falling back) caused `_detect_semantics` to return "flow" for *every* column, breaking stock detection for `stock_inventory`, `index_price`, `rate_interest` in both `disaggregate_columns` (wrong interp: sum instead of last-anchor) and `aggregate` (sum instead of last). Reverted default to `autodetect_semantics=True`.
+- **Improved `_detect_semantics` heuristic**: Clear stocks (strictly monotonic cumulative like inventory; smooth low-rel levels like rate/index) now correctly → "stock". Sign-changing/mean-reverting → "flow". For the genuine ambiguity case (trending positive flows like `flow_sales` that look monotonic/large-level), emit a specific `UserWarning` naming the column + assumed semantics (defaults to "flow" for additive safety) instead of blanket "flow" or silent stock. `_detected_semantics` now always records the *actual* per-column decision.
+- Same detection logic used symmetrically for disagg and agg paths → default round-trips are correct for clear cases.
+- Added regression tests exercising the acceptance repros (quarterly index as stock + interp, daily default agg semantics, detected values not constant, warning on ambiguous).
+- No regression to 1.6.1 fixes (week mass conservation exact, pyarrow-free calendar agg path) or prior calendar/nesting behavior. Explicit `col_semantics` continues to override.
+- Re-ran full acceptance block + nesting matrix on daily/weekly/monthly/quarterly files; ruff + basic suite green.
+
 ## [1.6.1] - 2026-07-07
 
 ### Fixed

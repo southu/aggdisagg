@@ -13,6 +13,7 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from typing import Any, Literal
 
 import numpy as np
@@ -341,7 +342,7 @@ class TemporalAligner:
         extrapolate: Literal["nan", "hold", "linear", "drop"] = "nan",
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
-        autodetect_semantics: bool = False,
+        autodetect_semantics: bool = True,
         **kwargs,
     ):
         self.method = method.lower()
@@ -454,13 +455,17 @@ class TemporalAligner:
         except Exception:
             return self._default_ratio(target_freq)
 
-    def _detect_semantics(self, y: np.ndarray) -> str:
-        """Heuristic to classify a low-freq series as 'stock' (level) or 'flow'.
+    def _detect_semantics(self, y: np.ndarray, col_name: str | None = None) -> str:
+        """Heuristic to classify a series as 'stock' (level) or 'flow'.
 
-        Stock: monotonic or one-signed, large absolute level relative to period changes
-               (e.g. cumulative balance like total mortgages).
-        Flow: sign-changing or mean-reverting, or changes comparable to level (e.g. revaluations).
-        Falls back to self.default_semantics with low confidence.
+        Stock (use last-of-period): strictly monotonic running totals (e.g. stock_inventory),
+            or bounded/smooth levels with small relative period-to-period changes (e.g. rate_interest,
+            index_price) even if trending slowly.
+        Flow (use sum): sign-changing, mean-reverting, or high relative variation additive series
+            (e.g. flow_net_signed). Trending positive additive series (e.g. flow_sales) are
+            ambiguous with stock-like levels and trigger a warning + assumed 'flow'.
+
+        Returns the chosen semantics. Emits UserWarning (with col name) for low-confidence cases.
         """
         y = np.asarray(y, dtype=float)
         valid = np.isfinite(y)
@@ -474,9 +479,51 @@ class TemporalAligner:
         is_mono = np.all(diffs >= -1e-9) or np.all(diffs <= 1e-9)
         mostly_same_sign = (np.sum(yv > 0) > 0.8 * len(yv)) or (np.sum(yv < 0) > 0.8 * len(yv))
         large_level = np.median(np.abs(yv)) > 5 * (np.median(abs_d) + 1e-9)
-        if (is_mono or mostly_same_sign) and rel < 0.3 and large_level:
+        has_sign_change = (np.min(yv) < -1e-9) and (np.max(yv) > 1e-9)
+
+        if has_sign_change:
+            return "flow"
+
+        # Strong stock: monotonic cumulative (inventory etc.)
+        if is_mono and rel < 0.25 and large_level:
             return "stock"
-        return self.default_semantics
+
+        # Other stock levels (rate, index/price): small rel change + persistent
+        if rel < 0.15 and large_level and mostly_same_sign:
+            ambiguous = False
+            if len(diffs) > 5:
+                try:
+                    acd = float(np.corrcoef(diffs[:-1], diffs[1:])[0, 1])
+                    if np.isfinite(acd) and acd < 0.5:
+                        # diffs fluctuate independently → more flow-like even if low rel (trending flow)
+                        ambiguous = True
+                except Exception:
+                    pass
+            if not ambiguous:
+                return "stock"
+            # else fall through to ambiguous handling
+
+        if rel > 0.2 or not large_level:
+            return "flow"
+
+        # Ambiguous / low-confidence case (e.g. trending positive flow vs growing level)
+        assumed = "flow"  # safe for most additive economic flows; user can override
+        if col_name:
+            warnings.warn(
+                f"Auto-detected semantics for column '{col_name}' is ambiguous "
+                f"(trending/monotonic positive series); assuming '{assumed}'. "
+                f"Provide col_semantics={{'{col_name}': 'stock'}} (or 'flow') to override for correct aggregation.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            warnings.warn(
+                f"Auto-detected semantics is ambiguous; assuming '{assumed}'. "
+                "Provide col_semantics to override.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return assumed
 
     def _default_ratio(self, target_freq: str | None) -> int:
         ratio = 12
@@ -1082,7 +1129,7 @@ class TemporalAligner:
         extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
-        autodetect_semantics: bool = False,
+        autodetect_semantics: bool = True,
         **fit_kwargs,
     ) -> pl.DataFrame:
         """Disaggregate multiple target columns from one low-frequency DataFrame.
@@ -1169,7 +1216,7 @@ class TemporalAligner:
                 col_to_sem[col] = eff_map[col]
             elif eff_autodetect:
                 y = pdf[col].to_numpy().astype(float)
-                col_to_sem[col] = self._detect_semantics(y)
+                col_to_sem[col] = self._detect_semantics(y, col_name=col)
             else:
                 col_to_sem[col] = eff_default
 
@@ -1250,12 +1297,12 @@ class TemporalAligner:
         target_col : str
             Legacy single-col name (used only in no-datetime fallback paths).
         col_semantics, default_semantics :
-            Per-column "stock" (use last) or "flow" (sum). If autodetect_semantics=True (opt-in),
-            uses heuristic on the series (imperfect for trending positive flows; prefer explicit).
+            Per-column "stock" (use last) or "flow" (sum). autodetect (default) uses the heuristic;
+            ambiguous cases warn and assume a safe default (usually flow for additive). Prefer explicit for clarity.
         autodetect_semantics : bool or None
-            If True, use _detect_semantics heuristic when col not in col_semantics.
-            Default (False) means use default_semantics ("flow") for unspecified cols.
-            Set True explicitly to opt into heuristic (or set on TemporalAligner()).
+            If True (default), use _detect_semantics heuristic when col not in col_semantics.
+            For ambiguous series a UserWarning is emitted and a safe default assumed.
+            Set False to force default_semantics for all unspecified cols.
         week_policy : {"week_end", "proportional"}
             For weekly input to month/quarter/year:
             - "week_end": assign each week's full value once to the (target) period containing its week-end date.
@@ -1337,7 +1384,7 @@ class TemporalAligner:
         eff_map = dict(getattr(self, "col_semantics", {}) or {})
         if col_semantics:
             eff_map.update(col_semantics)
-        eff_autodetect = autodetect_semantics if autodetect_semantics is not None else getattr(self, "autodetect_semantics", False)
+        eff_autodetect = autodetect_semantics if autodetect_semantics is not None else getattr(self, "autodetect_semantics", True)
         eff_default = default_semantics if default_semantics is not None else getattr(self, "default_semantics", "flow")
         col_to_sem = {}
         for c in num_cols:
@@ -1345,7 +1392,7 @@ class TemporalAligner:
                 col_to_sem[c] = eff_map[c]
             elif eff_autodetect:
                 y = high_df[c].to_numpy().astype(float)
-                col_to_sem[c] = self._detect_semantics(y)
+                col_to_sem[c] = self._detect_semantics(y, col_name=c)
             else:
                 col_to_sem[c] = eff_default
         self._detected_semantics = col_to_sem  # BUG4: expose like disaggregate_columns
