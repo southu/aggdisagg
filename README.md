@@ -84,6 +84,49 @@ monthly.plot()  # or use .plot() on the result if extended
 
 All methods guarantee `C @ y_high ≈ y_low` exactly.
 
+## Real-World Example: Disaggregating Multiple Quarterly Series to Monthly
+
+When you have a DataFrame with several low-frequency series (e.g. quarterly revenue for multiple companies) and want to convert them all to monthly while preserving the aggregation constraint, use the `disaggregate_columns` helper:
+
+```python
+import polars as pl
+from datetime import date
+from aggdisagg import TemporalAligner
+
+# Synthetic quarterly data (mimics real company revenue files)
+df_q = pl.DataFrame({
+    "date": [date(2018, 3, 1), date(2018, 6, 1), date(2018, 9, 1), date(2018, 12, 1)],
+    "Krones": [1_020_000_000, 1_028_000_000, 1_032_000_000, 1_328_000_000],
+    "JBT":     [409_200_000,   491_300_000,   481_900_000,   537_300_000],
+    "GEA":     [1_189_000_000, 1_403_000_000, 1_360_000_000, 1_570_000_000],
+})
+
+aligner = TemporalAligner(method="linear", target_freq="1mo", agg="sum")
+
+monthly = aligner.disaggregate_columns(
+    df_q,
+    datetime_col="date",
+    include_dates=True,   # automatically generates proper monthly dates
+)
+
+print(monthly.head(6))
+# date        Krones        JBT           GEA
+# 2018-01-01  ~339.1m      ~131.1m      ~374.3m
+# ...
+# Round-trip check
+reagg = aligner.aggregate(monthly.drop("date"), freq="1q")
+print("Sums match original quarters:", 
+      (reagg["y_1q"] - df_q["Krones"]).abs().sum() < 1e-6)
+```
+
+**Notes**
+- The helper automatically detects numeric columns as targets (or pass `target_cols=[...]`).
+- Date inference now correctly chooses a ratio of 3 for quarterly → monthly (instead of assuming annual).
+- Use `include_dates=True` for a ready-to-use monthly date column, or call `expand_high_freq_dates` yourself for custom alignment.
+- All series are disaggregated independently but share the same frequency mapping.
+
+See `examples/quickstart.py` for more patterns.
+
 ## Why aggdisagg?
 
 - **Polars-native** core (lazy-friendly)

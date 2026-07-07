@@ -224,6 +224,100 @@ class TemporalAligner:
         self._methods_used: list = []  # for ensemble
         self._fitted = False
 
+    def _infer_ratio(self, low_dates: Any, target_freq: str | None) -> int:
+        """Compute how many high-frequency periods correspond to one low-frequency period.
+
+        Uses actual low_dates (if available) to infer the low frequency (e.g. quarterly vs annual)
+        combined with the requested target_freq. This allows correct disaggregation for
+        quarterly->monthly (x3), annual->monthly (x12), weekly->daily (x7), etc.
+        Falls back to the old target-only heuristic if dates are missing or unparseable.
+        """
+        if pd is None:
+            return self._default_ratio(target_freq)
+
+        try:
+            dates_list = []
+            if low_dates is not None:
+                if isinstance(low_dates, pl.Series):
+                    dates_list = low_dates.to_list()
+                elif isinstance(low_dates, (list, tuple)):
+                    dates_list = list(low_dates)
+                elif hasattr(low_dates, "to_list"):
+                    try:
+                        dates_list = low_dates.to_list()
+                    except Exception:
+                        pass
+
+            if not dates_list:
+                return self._default_ratio(target_freq)
+
+            dates_pd = pd.to_datetime(dates_list, errors="coerce")
+            dates_pd = pd.Series(dates_pd).dropna()
+            if len(dates_pd) < 2:
+                return self._default_ratio(target_freq)
+
+            low_f = None
+            if len(dates_pd) >= 3:
+                try:
+                    low_f = pd.infer_freq(dates_pd)
+                except Exception:
+                    low_f = None
+            if low_f is None:
+                # Fallback delta-based inference (robust even for 2 samples)
+                delta_days = (dates_pd.iloc[1] - dates_pd.iloc[0]).days
+                if delta_days >= 300:
+                    low_f = "Y"
+                elif delta_days >= 80:
+                    low_f = "Q"
+                elif delta_days >= 20:
+                    low_f = "M"
+                elif delta_days >= 5:
+                    low_f = "W"
+                else:
+                    low_f = "D"
+
+            t = (target_freq or "1mo").lower()
+            lu = (low_f or "").upper()
+
+            # Specific mappings for common real-world cases (revenue flows etc.)
+            if any(c in lu for c in ("Q", "QS", "BQ")):
+                if any(x in t for x in ("mo", "1m", "month")):
+                    return 3
+                if "q" in t:
+                    return 1
+                if any(x in t for x in ("d", "day")):
+                    return 91
+
+            if any(c in lu for c in ("A", "Y", "AS", "YS", "BA")):
+                if any(x in t for x in ("mo", "1m", "month")):
+                    return 12
+                if "q" in t:
+                    return 4
+
+            if any(c in lu for c in ("M", "MS", "BM")):
+                if any(x in t for x in ("d", "day")):
+                    return 30
+                if "w" in t:
+                    return 4
+
+            if any(c in lu for c in ("W", "WS")):
+                if any(x in t for x in ("d", "day")):
+                    return 7
+
+            # fall through to default
+            return self._default_ratio(target_freq)
+        except Exception:
+            return self._default_ratio(target_freq)
+
+    def _default_ratio(self, target_freq: str | None) -> int:
+        ratio = 12
+        tf = (target_freq or "").lower()
+        if "q" in tf:
+            ratio = 4
+        elif "d" in tf or "day" in tf:
+            ratio = 30
+        return ratio
+
     def _prepare_data(
         self, df: pl.DataFrame, datetime_col: str = "date", target_col: str = "y"
     ) -> tuple[np.ndarray, np.ndarray, int]:
@@ -244,13 +338,9 @@ class TemporalAligner:
             self._y_high = np.array([], dtype=float)
             return y_low, self._X_high, 0
 
-        # For skeleton: assume target_freq implies ratio. In real: use date ranges.
-        ratio = 12
-        tf = self.target_freq.lower()
-        if "q" in tf:
-            ratio = 4
-        elif "d" in tf or "day" in tf:
-            ratio = 30
+        # Use dates when available to pick correct multiplier (e.g. Q->M is 3 not 12)
+        date_series = df[datetime_col] if datetime_col in df.columns else None
+        ratio = self._infer_ratio(date_series, self.target_freq)
 
         n_high = n_low * ratio
         self._n_high = n_high
@@ -569,16 +659,95 @@ class TemporalAligner:
             high_df = high_df.lazy()
         return high_df
 
+    def disaggregate_columns(
+        self,
+        df: Any,
+        datetime_col: str = "date",
+        target_cols: list[str] | None = None,
+        include_dates: bool = False,
+        **fit_kwargs,
+    ) -> pl.DataFrame:
+        """Disaggregate multiple target columns from one low-frequency DataFrame.
+
+        Convenient when you have several series (e.g. revenue for multiple companies)
+        that should be disaggregated with the same configuration (method, target_freq,
+        indicators if any, ensemble, etc.).
+
+        All columns are treated as independent targets. If you have per-column
+        indicators, call this once per group or use fit_transform in a loop.
+
+        Parameters
+        ----------
+        df : DataFrame-like
+            Input containing a datetime column and one or more numeric target columns.
+        datetime_col : str, default "date"
+            Name of the datetime column.
+        target_cols : list of str or None
+            Columns to disaggregate. If None, auto-selects all numeric columns
+            except `datetime_col`.
+        include_dates : bool, default False
+            If True, prepends a 'date' column containing high-frequency dates
+            generated via expand_high_freq_dates (starts from the first low date).
+        **fit_kwargs
+            Passed through to each fit_transform call (e.g. indicator_cols, n_bootstrap).
+
+        Returns
+        -------
+        pl.DataFrame
+            One column per target (column name preserved). Length = n_low * ratio.
+            If include_dates=True, a leading 'date' column is added.
+        """
+        # Normalize input to Polars DataFrame for introspection
+        if isinstance(df, pl.DataFrame):
+            pdf = df
+        elif hasattr(df, "to_pandas"):
+            pdf = pl.from_pandas(df.to_pandas())
+        else:
+            pdf = pl.DataFrame(df)
+
+        if target_cols is None:
+            target_cols = [
+                c for c in pdf.columns
+                if c != datetime_col and str(pdf[c].dtype).lower() in ("float64", "float32", "int64", "int32", "int")
+            ]
+
+        if not target_cols:
+            raise ValueError("No target columns found to disaggregate.")
+
+        # Fit once on the date structure + first target (establishes _C, n_high, etc.)
+        first_col = target_cols[0]
+        first_sub = pdf.select([datetime_col, first_col])
+        _ = self.fit_transform(
+            first_sub, datetime_col=datetime_col, target_col=first_col, **fit_kwargs
+        )
+
+        high_parts: list[pl.DataFrame] = []
+        for col in target_cols:
+            sub = pdf.select([datetime_col, col])
+            high = self.fit_transform(
+                sub, datetime_col=datetime_col, target_col=col, **fit_kwargs
+            )
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+            high = high.rename({"y_disaggregated": col})
+            if "y_std" in high.columns:
+                high = high.drop("y_std")
+            high_parts.append(high)
+
+        out = pl.concat(high_parts, how="horizontal")
+
+        if include_dates and getattr(self, "_n_low", 0) > 0:
+            low_dates = pdf[datetime_col]
+            high_dates = self.expand_high_freq_dates(low_dates)
+            out = out.with_columns(high_dates.alias("date")).select(["date"] + target_cols)
+
+        return out
+
     def aggregate(self, high_df: pl.DataFrame, freq: str = "1y", target_col: str = "y_disaggregated") -> pl.DataFrame:
         """Symmetric aggregation back to lower frequency."""
         if self._C is None or self._n_low == 0:
-            # fallback using stored target_freq ratio if available
-            ratio = 12
-            tf = (self.target_freq or "").lower()
-            if "q" in tf:
-                ratio = 4
-            elif "d" in tf or "day" in tf:
-                ratio = 30  # pragma: no cover (or hit via test)
+            # fallback using inferred ratio (best effort without dates)
+            ratio = self._infer_ratio(None, self.target_freq)
             n = len(high_df)
             n_low = max(1, n // ratio)
             return pl.DataFrame({f"y_{freq}": high_df[target_col].to_numpy()[:n_low]})
@@ -617,15 +786,16 @@ class TemporalAligner:
         if n_low == 0:
             return pl.Series([], dtype=pl.Datetime)
 
-        ratio = 12
-        tf = target_freq.lower()
+        # Use date-aware inference for correct expansion factor (Q->M =3, Y->M=12, etc.)
+        ratio = self._infer_ratio(low, target_freq)
+        tf = (target_freq or self.target_freq or "1mo").lower()
         high_interval = "1mo"
         if "q" in tf:
-            ratio = 4
             high_interval = "1mo"
         elif "d" in tf or "day" in tf:
-            ratio = 30
             high_interval = "1d"
+        elif "w" in tf:
+            high_interval = "1w"  # best effort
         elif "y" in tf:
             high_interval = "1mo"
 
@@ -635,7 +805,7 @@ class TemporalAligner:
             import pandas as pd
             start_pd = pd.Timestamp(start) if not isinstance(start, (pd.Timestamp, pd.DatetimeTZDtype)) else start
             # Map our interval
-            pd_freq = {"1mo": "MS", "1d": "D"}.get(high_interval, "MS")
+            pd_freq = {"1mo": "MS", "1d": "D", "1w": "W"}.get(high_interval, "MS")
             high_pd = pd.date_range(start=start_pd, periods=n_low * ratio, freq=pd_freq)
             # Return as polars date series
             return pl.Series(high_pd.date)
