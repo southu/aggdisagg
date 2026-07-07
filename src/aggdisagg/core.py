@@ -464,8 +464,17 @@ class TemporalAligner:
 
         # xarray support
         if xr is not None and isinstance(df, xr.DataArray):
-            # Convert to polars for processing
-            df = df.to_dataframe().reset_index().pipe(pl.from_pandas) if hasattr(df, 'to_dataframe') else pl.from_pandas(df.to_pandas())
+            # Convert to polars for processing; handle unnamed DataArray defensively
+            try:
+                if df.name is None:
+                    df = df.rename("y")
+                pdf = df.to_dataframe().reset_index()
+                df = pl.from_pandas(pdf)
+            except Exception:
+                try:
+                    df = pl.from_pandas(df.to_pandas())
+                except Exception:
+                    df = pl.from_pandas(pd.DataFrame({"t": range(len(df)), "y": np.asarray(df)}))
             datetime_col = df.columns[0]  # assume first is time
 
         self.fit(df, datetime_col, target_col)
