@@ -161,7 +161,7 @@ high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date")
 **Limitations (as of 1.1.0)**
 - Date expansion in the output is basic (low-freq dates are not auto-expanded).
 - Uncertainty is a simple bootstrap and can be noisy or near-zero.
-- `denton`, `litterman`, `fernandez` implementations are functional but not as sophisticated as the classic R packages yet.
+- All listed methods are fully implemented, produce distinct results, respond to indicators/ρ where applicable, and satisfy the aggregation constraint. (Denton uses quadratic penalty on first/second differences; Chow-Lin family uses GLS with AR(1) or IAR(1) errors.)
 - Only regular frequency ratios are supported.
 
 See the CHANGELOG for the full list of recent robustness and correctness fixes.

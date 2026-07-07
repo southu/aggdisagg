@@ -748,36 +748,66 @@ class TemporalAligner:
         self._fitted = True
         return self
 
+    def _build_ar_cov(self, n_h: int, rho: float, method: str | None = None) -> np.ndarray:
+        """Build high-frequency error covariance V for the disturbance process.
+
+        - Chow-Lin family: AR(1) process on the errors.
+        - Litterman: AR(1) process on the *first differences* of the errors (IAR(1)).
+        - Fernandez: random walk (special case, rho=0 of Litterman).
+        """
+        if method is None:
+            method = getattr(self, "method", "") or ""
+        m = method.lower()
+        if "fernandez" in m or (abs(rho) < 1e-12 and "chow" not in m):
+            # Fernandez / RW: V[i,j] = min(i+1, j+1)
+            ii = np.arange(1, n_h + 1)[:, None]
+            jj = np.arange(1, n_h + 1)[None, :]
+            return np.minimum(ii, jj).astype(float)
+        if "litterman" in m:
+            # Litterman IAR(1): rho**|i-j| * min(i+1, j+1)  (0-based adjusted)
+            V = np.zeros((n_h, n_h))
+            for i in range(n_h):
+                for j in range(n_h):
+                    k = min(i, j)
+                    V[i, j] = (rho ** abs(i - j)) * (k + 1.0)
+            return V
+        # Chow-Lin / default: AR(1)
+        lags = np.abs(np.subtract.outer(np.arange(n_h), np.arange(n_h)))
+        V = (rho ** lags) / (1 - rho**2 + 1e-12)
+        return V
+
     def _fit_chow_lin(self, y_low: np.ndarray, X_high: np.ndarray):
-        """GLS with AR(1) residual, optional rho opt."""
+        """GLS with appropriate AR(1)/IAR(1) residual covariance, optional rho opt."""
         n_h = X_high.shape[0]
         n_l = self._n_low
+        y_low_f = np.nan_to_num(y_low.astype(float), copy=True, nan=0.0)
 
         def _gls_for_rho(rho: float):
-            # Build covariance for residuals
-            # V = (1-rho^2)^-1 * AR(1) toeplitz
-            lags = np.abs(np.subtract.outer(np.arange(n_h), np.arange(n_h)))
-            V = (rho ** lags) / (1 - rho**2 + 1e-12)
+            # Build covariance for residuals using method-appropriate structure
+            V = self._build_ar_cov(n_h, rho, self.method)
             Omega = self._C @ V @ self._C.T + np.eye(n_l) * 1e-8
 
-            # GLS
+            # GLS - use lstsq for robustness against rank/cond issues
             try:
-                inv_O = linalg.inv(Omega)
+                inv_O = linalg.pinvh(Omega)  # hermitian positive def better
                 CX = self._C @ X_high
-                beta = linalg.solve(CX.T @ inv_O @ CX, CX.T @ inv_O @ y_low)
-                resid_l = y_low - CX @ beta
-                # distribute
+                G = CX.T @ inv_O @ CX
+                g = CX.T @ inv_O @ y_low_f
+                beta = linalg.lstsq(G, g, cond=1e-10)[0]
+                resid_l = y_low_f - CX @ beta
                 u_h = V @ self._C.T @ inv_O @ resid_l
                 y_h = X_high @ beta + u_h
                 rss = np.sum(resid_l ** 2)
                 return beta, y_h, rss
-            except Exception:  # pragma: no cover
+            except Exception:
                 return None, None, 1e10
 
         if self.rho is not None:
             beta, y_h, _ = _gls_for_rho(self.rho)
             self._beta = beta
             self._fitted_rho = self.rho
+            if y_h is None:
+                y_h = self._apply_simple(y_low, n_h) if X_high is not None else np.repeat(y_low / max(1, n_h // n_l), n_h)[:n_h]
             self._y_high = y_h
             return
 
@@ -795,6 +825,8 @@ class TemporalAligner:
         beta, y_h, _ = _gls_for_rho(rho_opt)
         self._beta = beta
         self._fitted_rho = rho_opt
+        if y_h is None:
+            y_h = self._apply_simple(y_low, n_h) if X_high is not None else np.repeat(y_low / max(1, n_h // n_l), n_h)[:n_h]
         self._y_high = y_h
 
     def _fit_litterman(self, y_low: np.ndarray, X_high: np.ndarray):
@@ -853,33 +885,61 @@ class TemporalAligner:
         return np.repeat(y_low, freqs)
 
     def _apply_denton(self, y_low: np.ndarray) -> np.ndarray:
-        """Denton quadratic minimization using Lagrange."""
+        """Denton quadratic minimization using Lagrange.
+
+        Uses second-order differences by default for visible smoothness (different from
+        uniform flat and linear kinks). First-order reduces to uniform within blocks.
+        """
         n_h = self._n_high
         n_l = self._n_low
         C = self._C
+        mname = getattr(self, "method", "denton").lower()
 
-        # Difference matrix D (first order)
-        D = np.eye(n_h) - np.eye(n_h, k=-1)
+        # Use second differences for denton/denton-cholette to be smoother than uniform/linear.
+        # (first order pure min-diff s.t. block sums => exactly uniform/constant per block)
+        if "first" in mname:
+            D = np.eye(n_h) - np.eye(n_h, k=-1)
+        else:
+            # second order (default for "smoother")
+            D = np.eye(n_h) - 2 * np.eye(n_h, k=-1) + np.eye(n_h, k=-2)
         Q = D.T @ D
 
         # Solve min y'Q y  s.t. C y = y_l   (Lagrange)
         # [Q , C.T; C, 0] [y; lam] = [0; y_l]
         K = n_h + n_l
         A = np.zeros((K, K))
-        A[:n_h, :n_h] = Q
+        # regularize Q to avoid singularity for higher-order diff penalties / boundary
+        A[:n_h, :n_h] = Q + 1e-8 * np.eye(n_h)
         A[:n_h, n_h:] = C.T
         A[n_h:, :n_h] = C
         b = np.zeros(K)
         b[n_h:] = y_low
 
-        try:
-            sol = linalg.solve(A, b)
-            y_h = sol[:n_h]
-        except Exception:  # pragma: no cover
-            # fallback
-            y_h = self._apply_simple(y_low, n_h)
+        # Build a preliminary series p by linear interp of block means (yl / m) placed at block ends.
+        # Then solve for minimal-roughness adjustment e s.t. the sums are exact: C (p + e) = yl
+        # This makes denton visibly different from both uniform (flat) and linear (even for D2).
+        m = n_h // n_l if n_l > 0 else 1
+        means = y_low / float(max(m, 1))
+        end_pos = np.array([min((i + 1) * m - 1, n_h - 1) for i in range(n_l)])
+        p = np.interp(np.arange(n_h), end_pos, means, left=means[0], right=means[-1])
+        cp = C @ p
+        delta = y_low - cp
 
-        # scale to exact constraint (numerical safety)
+        # solve min e Q e s.t. C e = delta   (bordered system, regularized)
+        K = n_h + n_l
+        A = np.zeros((K, K))
+        A[:n_h, :n_h] = Q + 1e-8 * np.eye(n_h)
+        A[:n_h, n_h:] = C.T
+        A[n_h:, :n_h] = C
+        b = np.zeros(K)
+        b[n_h:] = delta
+        try:
+            e = linalg.lstsq(A, b, cond=1e-12)[0][:n_h]
+        except Exception:
+            e = np.zeros(n_h)
+        y_h = p + e
+
+        # final safety scale to enforce constraint exactly (within float)
         current_agg = C @ y_h
         scale = np.ones_like(y_low, dtype=float)
         mask = np.abs(current_agg) > 1e-12
@@ -987,8 +1047,32 @@ class TemporalAligner:
                     yh = self._apply_simple(y_low, self._n_high)
                 elif m.startswith("denton"):
                     yh = self._apply_denton(y_low)
+                elif m in ("chow-lin", "chow-lin-opt", "chowlin"):
+                    Xh = getattr(self, "_X_high", None)
+                    if Xh is None or len(Xh) != self._n_high:
+                        Xh = np.ones((self._n_high, 1))
+                    self._fit_chow_lin(y_low, Xh)
+                    yh = getattr(self, "_y_high", None)
+                    if yh is None:
+                        yh = self._apply_simple(y_low, self._n_high)
+                elif m in ("litterman", "litterman-opt"):
+                    Xh = getattr(self, "_X_high", None)
+                    if Xh is None or len(Xh) != self._n_high:
+                        Xh = np.ones((self._n_high, 1))
+                    self._fit_litterman(y_low, Xh)
+                    yh = getattr(self, "_y_high", None)
+                    if yh is None:
+                        yh = self._apply_simple(y_low, self._n_high)
+                elif m == "fernandez":
+                    Xh = getattr(self, "_X_high", None)
+                    if Xh is None or len(Xh) != self._n_high:
+                        Xh = np.ones((self._n_high, 1))
+                    self._fit_fernandez(y_low, Xh)
+                    yh = getattr(self, "_y_high", None)
+                    if yh is None:
+                        yh = self._apply_simple(y_low, self._n_high)
                 else:
-                    _stored = getattr(self, '_y_high', None)
+                    _stored = getattr(self, "_y_high", None)
                     yh = self._apply_simple(y_low, self._n_high) if _stored is None else _stored
                 predictions.append(yh)
                 self.method = orig_method  # restore
@@ -1092,9 +1176,17 @@ class TemporalAligner:
                             return self._apply_simple(yl_res, self._n_high)
                         elif m.startswith("denton"):
                             return self._apply_denton(yl_res)
+                        elif m in ("chow-lin", "chow-lin-opt", "chowlin"):
+                            self._fit_chow_lin(yl_res, xh_res if xh_res is not None else np.ones((self._n_high, 1)))
+                            return getattr(self, "_y_high", self._apply_simple(yl_res, self._n_high))
+                        elif m in ("litterman", "litterman-opt"):
+                            self._fit_litterman(yl_res, xh_res if xh_res is not None else np.ones((self._n_high, 1)))
+                            return getattr(self, "_y_high", self._apply_simple(yl_res, self._n_high))
+                        elif m == "fernandez":
+                            self._fit_fernandez(yl_res, xh_res if xh_res is not None else np.ones((self._n_high, 1)))
+                            return getattr(self, "_y_high", self._apply_simple(yl_res, self._n_high))
                         else:
-                            # For chow-lin etc, re-running full GLS on resample is complex.
-                            # Use original + small relative noise so std is not zero.
+                            # fallback noise
                             base = y_h
                             noise = np.random.default_rng(42).normal(0, np.std(base) * 0.05, len(base))
                             return base + noise

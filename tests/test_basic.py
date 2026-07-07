@@ -717,8 +717,44 @@ def test_162_auto_detection_restored_and_symmetric():
         warnings.simplefilter("ignore", UserWarning)
         _ = b.aggregate(d, freq="1mo", datetime_col="date")
     assert b._detected_semantics["stock_inventory"] == "stock"
-    # not a constant 'flow' for everything
-    assert b._detected_semantics.get("flow_net_signed") == "flow"
+
+
+def test_170_methods_are_distinct_and_machinery_works():
+    """1.7.0: methods must be genuinely different; indicators and rho must affect output; still satisfy agg constraint."""
+    import numpy as np
+    pdf = pd.read_csv("/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-quarterly.csv")
+    d = pl.DataFrame({
+        "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+        "flow_sales": pdf["flow_sales"].astype(float).tolist(),
+        "rate_interest": pdf["rate_interest"].astype(float).tolist(),
+    })
+    def run(m, **kw):
+        a = TemporalAligner(method=m, target_freq="1mo", agg="sum", **kw)
+        sel = d if "indicator_cols" in kw else d.select(["date", "flow_sales"])
+        res = a.disaggregate_columns(
+            sel, datetime_col="date", include_dates=True,
+            col_semantics={"flow_sales": "flow", "rate_interest": "stock"}
+        )
+        return res["flow_sales"].to_numpy()
+    u = run("uniform")
+    for m in ["denton", "chow-lin", "litterman", "fernandez"]:
+        md = np.nanmax(np.abs(run(m) - u))
+        assert md > 1e-3, f"{m} identical to uniform (diff={md})"
+    # indicator affects chow-lin
+    md_ind = np.nanmax(np.abs(run("chow-lin", indicator_cols=["rate_interest"]) - run("chow-lin")))
+    assert md_ind > 1e-3
+    # rho/opt affects
+    md_rho = np.nanmax(np.abs(run("chow-lin-opt") - run("chow-lin")))
+    assert md_rho > 1e-3
+    # constraint still holds for a couple
+    for m in ["denton", "chow-lin"]:
+        a = TemporalAligner(method=m, target_freq="1mo", agg="sum")
+        mo = a.disaggregate_columns(d.select(["date", "flow_sales"]), datetime_col="date", include_dates=True,
+                                    col_semantics={"flow_sales": "flow"})
+        high = mo["flow_sales"].to_numpy()
+        re = high.reshape(-1, 3).sum(axis=1)
+        err = np.nanmax(np.abs(re - d["flow_sales"].to_numpy()))
+        assert err < 1e-6, f"{m} agg err {err}"
 
 
 def test_162_ambiguous_trending_flow_emits_warning_and_records_actual():

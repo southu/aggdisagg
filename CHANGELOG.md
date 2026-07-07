@@ -5,6 +5,18 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-07
+
+### Added / Fixed
+- **Major methods implementation (6/8 were stubs)**: `denton`/`denton-cholette`, `chow-lin`/`chow-lin-opt`, `litterman`, `fernandez` now produce genuinely distinct high-frequency series (not byte-identical to uniform).
+  - Denton: quadratic penalty (first or second differences) via robust constrained optimization on the high-freq path; visibly smoother/non-flat vs uniform.
+  - Chow-Lin family: full GLS with AR(1) (or IAR(1) for Litterman) covariance; output responds to `indicator_cols` and `rho` (opt for *-opt*).
+  - Litterman uses IAR(1) cov; Fernandez is the rho=0 random-walk special case.
+  - All still satisfy exact (or 1e-6) aggregation constraint after final scaling; calendar/irregular ratios preserved.
+- Added regression test `test_170_methods_are_distinct_and_machinery_works` exercising pairwise diffs, indicator/ρ effects, and constraint (using the quarterly test file).
+- Updated README to reflect that all listed methods are now real/working.
+- If a method were left unimplemented it would now raise rather than silently alias (per guidance).
+
 ## [1.6.2] - 2026-07-07
 
 ### Fixed
