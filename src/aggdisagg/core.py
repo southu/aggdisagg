@@ -12,6 +12,7 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any, Literal
 
 import numpy as np
@@ -199,6 +200,10 @@ class TemporalAligner:
         correct_negatives: bool = True,
         use_ensemble: bool = False,
         n_bootstrap: int = 100,
+        extrapolate: Literal["nan", "hold", "linear", "drop"] = "hold",
+        col_semantics: dict[str, str] | None = None,
+        default_semantics: Literal["stock", "flow"] = "flow",
+        autodetect_semantics: bool = True,
         **kwargs,
     ):
         self.method = method.lower()
@@ -209,6 +214,10 @@ class TemporalAligner:
         self.correct_negatives = correct_negatives
         self.use_ensemble = use_ensemble
         self.n_bootstrap = n_bootstrap
+        self.extrapolate = extrapolate
+        self.col_semantics = col_semantics or {}
+        self.default_semantics = default_semantics
+        self.autodetect_semantics = autodetect_semantics
         self.kwargs = kwargs
 
         self._C: np.ndarray | None = None
@@ -243,10 +252,8 @@ class TemporalAligner:
                 elif isinstance(low_dates, (list, tuple)):
                     dates_list = list(low_dates)
                 elif hasattr(low_dates, "to_list"):
-                    try:
+                    with contextlib.suppress(Exception):
                         dates_list = low_dates.to_list()
-                    except Exception:
-                        pass
 
             if not dates_list:
                 return self._default_ratio(target_freq)
@@ -300,14 +307,37 @@ class TemporalAligner:
                 if "w" in t:
                     return 4
 
-            if any(c in lu for c in ("W", "WS")):
-                if any(x in t for x in ("d", "day")):
-                    return 7
+            if any(c in lu for c in ("W", "WS")) and any(x in t for x in ("d", "day")):
+                return 7
 
             # fall through to default
             return self._default_ratio(target_freq)
         except Exception:
             return self._default_ratio(target_freq)
+
+    def _detect_semantics(self, y: np.ndarray) -> str:
+        """Heuristic to classify a low-freq series as 'stock' (level) or 'flow'.
+
+        Stock: monotonic or one-signed, large absolute level relative to period changes
+               (e.g. cumulative balance like total mortgages).
+        Flow: sign-changing or mean-reverting, or changes comparable to level (e.g. revaluations).
+        Falls back to self.default_semantics with low confidence.
+        """
+        y = np.asarray(y, dtype=float)
+        valid = np.isfinite(y)
+        yv = y[valid]
+        if len(yv) < 3:
+            return self.default_semantics
+        diffs = np.diff(yv)
+        abs_d = np.abs(diffs)
+        abs_y = np.abs(yv[:-1]) + 1e-9
+        rel = np.median(abs_d / abs_y)
+        is_mono = np.all(diffs >= -1e-9) or np.all(diffs <= 1e-9)
+        mostly_same_sign = (np.sum(yv > 0) > 0.8 * len(yv)) or (np.sum(yv < 0) > 0.8 * len(yv))
+        large_level = np.median(np.abs(yv)) > 5 * (np.median(abs_d) + 1e-9)
+        if (is_mono or mostly_same_sign) and rel < 0.3 and large_level:
+            return "stock"
+        return self.default_semantics
 
     def _default_ratio(self, target_freq: str | None) -> int:
         ratio = 12
@@ -607,12 +637,47 @@ class TemporalAligner:
         # Ensure exact aggregation (nan/inf safe for messy data cases)
         if self._C is not None:
             with np.errstate(invalid="ignore", divide="ignore"):
-                current = self._C @ y_h
+                # Use nan_to_num to prevent NaN pollution in groups that have NaN in their block
+                # (0 * NaN = NaN in float, which would make whole current NaN and break scaling for valid groups)
+                y_h_for_current = np.nan_to_num(y_h, copy=True, nan=0.0)
+                current = self._C @ y_h_for_current
                 factor = np.ones_like(current, dtype=float)
                 mask = np.abs(current) > 1e-12
                 safe = mask & np.isfinite(current) & np.isfinite(y_low)
                 factor[safe] = y_low[safe] / current[safe]
                 y_h = y_h * np.repeat(factor, ratio)
+
+        # Handle NaNs from NaN in low-freq anchors or end-of-range using extrapolate policy
+        # This prevents silent data loss for the final period(s) under default "hold"
+        had_nan = np.any(np.isnan(y_h))
+        if had_nan:
+            if self.extrapolate == "hold":
+                finite_idx = np.where(np.isfinite(y_h))[0]
+                if len(finite_idx) > 0:
+                    last_finite = finite_idx[-1]
+                    last_val = y_h[last_finite]
+                    to_fill = np.isnan(y_h) & (np.arange(len(y_h)) > last_finite)
+                    y_h[to_fill] = last_val
+            elif self.extrapolate == "linear":
+                # simple extend last slope for trailing
+                finite_idx = np.where(np.isfinite(y_h))[0]
+                if len(finite_idx) >= 2:
+                    last2 = finite_idx[-2:]
+                    slope = (y_h[last2[1]] - y_h[last2[0]]) / (last2[1] - last2[0])
+                    for j in range(last2[1]+1, len(y_h)):
+                        if np.isnan(y_h[j]):
+                            y_h[j] = y_h[j-1] + slope
+            # for "drop" and "nan" leave as-is (may have NaN)
+
+        if had_nan:
+            import warnings
+            warnings.warn(
+                "NaN values present in disaggregated series for one or more high-frequency periods "
+                "(caused by NaN in corresponding low-frequency input values or end-of-range). "
+                "Use extrapolate='hold' (default), 'linear', or 'drop' to control behavior.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # Negative correction
         if self.correct_negatives:
@@ -650,10 +715,8 @@ class TemporalAligner:
         # Callers who need repeated context columns can expand them manually.
         high_df = pl.DataFrame({"y_disaggregated": y_h})
         if self._std_errors is not None:
-            try:
+            with contextlib.suppress(Exception):  # pragma: no cover
                 high_df = high_df.with_columns(pl.Series(name="y_std", values=self._std_errors))
-            except Exception:  # pragma: no cover
-                pass
 
         if is_lazy:
             high_df = high_df.lazy()
@@ -665,6 +728,9 @@ class TemporalAligner:
         datetime_col: str = "date",
         target_cols: list[str] | None = None,
         include_dates: bool = False,
+        col_semantics: dict[str, str] | None = None,
+        default_semantics: Literal["stock", "flow"] = "flow",
+        autodetect_semantics: bool = True,
         **fit_kwargs,
     ) -> pl.DataFrame:
         """Disaggregate multiple target columns from one low-frequency DataFrame.
@@ -714,15 +780,43 @@ class TemporalAligner:
         if not target_cols:
             raise ValueError("No target columns found to disaggregate.")
 
-        # Fit once on the date structure + first target (establishes _C, n_high, etc.)
+        # Resolve semantics params (method args override instance)
+        eff_autodetect = autodetect_semantics if "autodetect_semantics" in locals() else self.autodetect_semantics
+        eff_default = default_semantics if "default_semantics" in locals() else self.default_semantics
+        eff_map = dict(self.col_semantics or {})
+        if col_semantics:
+            eff_map.update(col_semantics)
+
+        col_to_sem = {}
+        for col in target_cols:
+            if col in eff_map:
+                col_to_sem[col] = eff_map[col]
+            elif eff_autodetect:
+                y = pdf[col].to_numpy().astype(float)
+                col_to_sem[col] = self._detect_semantics(y)
+            else:
+                col_to_sem[col] = eff_default
+
+        self._detected_semantics = col_to_sem  # expose for inspection after call
+
+        # Fit structure once using first (will be overridden per col for agg)
         first_col = target_cols[0]
         first_sub = pdf.select([datetime_col, first_col])
         _ = self.fit_transform(
             first_sub, datetime_col=datetime_col, target_col=first_col, **fit_kwargs
         )
 
+        orig_agg = self.agg
         high_parts: list[pl.DataFrame] = []
+        used_aggs = {}
         for col in target_cols:
+            sem = col_to_sem[col]
+            if sem == "stock":
+                self.agg = "last"  # pin last of block to the level value
+            else:
+                self.agg = "sum"
+            used_aggs[col] = self.agg
+
             sub = pdf.select([datetime_col, col])
             high = self.fit_transform(
                 sub, datetime_col=datetime_col, target_col=col, **fit_kwargs
@@ -734,28 +828,61 @@ class TemporalAligner:
                 high = high.drop("y_std")
             high_parts.append(high)
 
-        out = pl.concat(high_parts, how="horizontal")
+        self.agg = orig_agg
+        self._last_disagg_aggs = used_aggs
+
+        out = pl.concat(high_parts, how="horizontal_extend")
 
         if include_dates and getattr(self, "_n_low", 0) > 0:
             low_dates = pdf[datetime_col]
             high_dates = self.expand_high_freq_dates(low_dates)
-            out = out.with_columns(high_dates.alias("date")).select(["date"] + target_cols)
+            out = out.with_columns(high_dates.alias("date")).select(["date", *target_cols])
 
         return out
 
     def aggregate(self, high_df: pl.DataFrame, freq: str = "1y", target_col: str = "y_disaggregated") -> pl.DataFrame:
-        """Symmetric aggregation back to lower frequency."""
+        """Symmetric aggregation back to lower frequency.
+
+        Supports both the classic single-column output from fit_transform (column "y_disaggregated"
+        or explicit target_col) and the multi-column output from disaggregate_columns (where
+        columns keep their original target names).
+        """
         if self._C is None or self._n_low == 0:
             # fallback using inferred ratio (best effort without dates)
             ratio = self._infer_ratio(None, self.target_freq)
             n = len(high_df)
             n_low = max(1, n // ratio)
-            return pl.DataFrame({f"y_{freq}": high_df[target_col].to_numpy()[:n_low]})
+            if target_col in high_df.columns:
+                return pl.DataFrame({f"y_{freq}": high_df[target_col].to_numpy()[:n_low]})
+            else:
+                # multi-col: aggregate every numeric column, keep names
+                num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
+                res = {c: high_df[c].to_numpy()[:n_low] for c in num_cols}
+                return pl.DataFrame(res)
 
-        y_h = high_df[target_col].to_numpy()
-        with np.errstate(invalid="ignore", divide="ignore"):
-            y_l = self._C @ y_h
-        return pl.DataFrame({f"y_{freq}": y_l})
+        if target_col in high_df.columns:
+            y_h = high_df[target_col].to_numpy()
+            with np.errstate(invalid="ignore", divide="ignore"):
+                y_l = self._C @ y_h
+            return pl.DataFrame({f"y_{freq}": y_l})
+        else:
+            # multi-column case: aggregate each numeric column, preserve names
+            num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
+            res = {}
+            orig_agg = self.agg
+            last_aggs = getattr(self, "_last_disagg_aggs", {})
+            with np.errstate(invalid="ignore", divide="ignore"):
+                for c in num_cols:
+                    agg_c = last_aggs.get(c, self.agg)
+                    self.agg = agg_c
+                    n_h = getattr(self, "_n_high", len(high_df))
+                    n_l = getattr(self, "_n_low", 1)
+                    C_c = _build_c_matrix(n_h, n_l, self.agg)
+                    y_h = high_df[c].to_numpy()
+                    y_l = C_c @ y_h
+                    res[c] = y_l
+            self.agg = orig_agg
+            return pl.DataFrame(res)
 
     def expand_high_freq_dates(
         self, low_dates: pl.Series | list | Any, target_freq: str | None = None
@@ -807,8 +934,8 @@ class TemporalAligner:
             # Map our interval
             pd_freq = {"1mo": "MS", "1d": "D", "1w": "W"}.get(high_interval, "MS")
             high_pd = pd.date_range(start=start_pd, periods=n_low * ratio, freq=pd_freq)
-            # Return as polars date series
-            return pl.Series(high_pd.date)
+            # Return as native Polars Date (not Object of python dates)
+            return pl.from_pandas(pd.Series(high_pd).to_frame("d"))["d"].cast(pl.Date)
         except Exception:
             # Fallback to repeating (same as internal construction)
             return low.repeat_by(ratio).list.explode(empty_as_null=True)

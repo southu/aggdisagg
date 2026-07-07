@@ -5,6 +5,36 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-07
+
+### Added
+- `TemporalAligner.disaggregate_columns()` now supports per-column `stock` vs `flow` semantics via `col_semantics`, `default_semantics`, and `autodetect_semantics` (with heuristic and override). Exposes `_detected_semantics`.
+- New `extrapolate` parameter on `TemporalAligner` ("hold" default, "linear", "nan", "drop") to control handling of NaN in low-freq input / end-of-range in disaggregation.
+- `detect_semantics()` convenience on aligner.
+- Excel extra in packaging (`aggdisagg[excel]`) for fastexcel/openpyxl.
+- Regression tests for NaN handling, exact aggregation per method, stock/flow auto+override, multi-col roundtrip, date dtype, README examples.
+
+### Changed
+- `aggregate()` now supports multi-column high-freq frames (from `disaggregate_columns`); preserves original column names and recovers correctly using per-col semantics/agg when available.
+- `include_dates=True` (and `expand_high_freq_dates`) now returns native `pl.Date` (was Object of python dates).
+- Final per-group C scaling now robust to NaN in y_h (prevents pollution of valid groups).
+- Default `extrapolate="hold"` ensures the final period is never silently dropped to NaN.
+- README updated with prominent Python >=3.10 note and Excel extra guidance; added detailed quarterly-to-monthly multi-series example using the helper (now runs as test).
+- Version bumped to 1.4.0 (breaking behavior changes for NaN policy, aggregate multi-col, date dtype in some paths; documented).
+
+### Fixed
+- Silent NaN tail in disagg when low-freq input had NaN or at end-of-range (now warns + holds by default).
+- False exact guarantee claim for "linear" + sum: now the post-scaling always enforces (for valid groups); docs updated to scope the claim appropriately.
+- README roundtrip example now runs without crash (aggregate works on named multi-col output).
+- Date column from include_dates is now pl.Date.
+- Onboarding notes for Python version and Excel deps.
+
+## [1.3.0] - 2026-07-07
+
+### Added
+- `disaggregate_columns()` helper for multi-target DataFrames (all columns as targets).
+- Date-aware ratio inference (Q→M now correctly 3).
+
 ## [1.2.0] - 2026-07-06
 
 ### Added

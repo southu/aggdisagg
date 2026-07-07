@@ -15,8 +15,10 @@
 **Install & try in 10 seconds:**
 
 ```bash
-pip install aggdisagg
+pip install "aggdisagg[all]"
 ```
+
+**Note:** Requires Python ≥ 3.10. For Excel support (`read_excel` etc.) use the `excel` extra or install `fastexcel` / `openpyxl` separately (or read with pandas + `pl.from_pandas`).
 
 ```python
 import polars as pl
