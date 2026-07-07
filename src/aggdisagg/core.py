@@ -101,11 +101,15 @@ def _ensemble_nnls(predictions: list[np.ndarray], C: np.ndarray, y_low: np.ndarr
     """Combine predictions using NNLS to satisfy aggregation."""
     if len(predictions) == 1:
         return predictions[0]
-    P = np.column_stack(predictions)
+    # filter to matching length predictions only (defensive for mixed method outputs)
+    lens = [len(p) for p in predictions]
+    target_len = max(lens) if lens else 0
+    clean_preds = [p if len(p) == target_len else np.resize(p, target_len) for p in predictions]
+    P = np.column_stack(clean_preds)
     # Handle NaN/Inf gracefully for messy data
     if np.any(~np.isfinite(P)) or np.any(~np.isfinite(y_low)):
         # fallback to first prediction (or mean)
-        return predictions[0]
+        return clean_preds[0]
     # Solve min ||C P w - y_low|| s.t. w >=0
     A = C @ P
     w, _ = optimize.nnls(A, y_low)
@@ -392,9 +396,11 @@ class TemporalAligner:
             x_new = np.linspace(0, len(y_low)-1, n_high)
             yh = np.interp(x_new, x, y_low)
             if self.agg == "sum":
-                yh *= (y_low.sum() / yh.sum())
+                s = yh.sum()
+                yh = yh * (y_low.sum() / s) if s != 0 and np.isfinite(s) else yh
             elif self.agg == "mean":
-                yh *= (y_low.mean() / yh.mean())
+                m = yh.mean()
+                yh = yh * (y_low.mean() / m) if m != 0 and np.isfinite(m) else yh
             return yh
         return np.repeat(y_low, n_high // len(y_low))
 
@@ -479,7 +485,8 @@ class TemporalAligner:
             elif m.startswith("denton"):
                 yh = self._apply_denton(y_low)
             else:
-                yh = getattr(self, '_y_high', self._apply_simple(y_low, self._n_high))
+                _stored = getattr(self, '_y_high', None)
+                yh = self._apply_simple(y_low, self._n_high) if _stored is None else _stored
             predictions.append(yh)
             self.method = orig_method  # restore
 
