@@ -343,6 +343,8 @@ class TemporalAligner:
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
         autodetect_semantics: bool = True,
+        week_start: str = "monday",
+        partial_weeks: Literal["keep", "drop"] = "keep",
         **kwargs,
     ):
         self.method = method.lower()
@@ -357,6 +359,8 @@ class TemporalAligner:
         self.col_semantics = col_semantics or {}
         self.default_semantics = default_semantics
         self.autodetect_semantics = autodetect_semantics
+        self.week_start = self._normalize_week_start(week_start)
+        self.partial_weeks = partial_weeks
         self.kwargs = kwargs
 
         self._C: np.ndarray | None = None
@@ -455,6 +459,31 @@ class TemporalAligner:
         except Exception:
             return self._default_ratio(target_freq)
 
+    @staticmethod
+    def _normalize_week_start(ws: str) -> int:
+        """Return weekday offset 0=Mon ... 6=Sun for the given week_start name."""
+        if not isinstance(ws, str):
+            raise ValueError("week_start must be a string")
+        ws = ws.lower().strip()
+        mapping = {
+            "monday": 0, "mon": 0,
+            "tuesday": 1, "tue": 1, "tues": 1,
+            "wednesday": 2, "wed": 2,
+            "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+            "friday": 4, "fri": 4,
+            "saturday": 5, "sat": 5,
+            "sunday": 6, "sun": 6,
+        }
+        if ws not in mapping:
+            names = "monday,tuesday,wednesday,thursday,friday,saturday,sunday (or 3-letter abbreviations)"
+            raise ValueError(f"Invalid week_start {ws!r}. Accepted names: {names}")
+        return mapping[ws]
+
+    @staticmethod
+    def _week_anchor_from_offset(offset: int) -> str:
+        days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+        return days[offset % 7]
+
     def _detect_semantics(self, y: np.ndarray, col_name: str | None = None) -> str:
         """Heuristic to classify a series as 'stock' (level) or 'flow'.
 
@@ -534,7 +563,7 @@ class TemporalAligner:
             ratio = 30
         return ratio
 
-    def _compute_high_lengths(self, low_dates: Any, target_freq: str | None = None) -> list[int]:
+    def _compute_high_lengths(self, low_dates: Any, target_freq: str | None = None, week_start: str | None = None) -> list[int]:
         """General calendar-aware per-low-period child counts for ANY (low_freq, target_freq) pair.
 
         For each source period, determine its true calendar end (using period semantics or observed),
@@ -569,11 +598,13 @@ class TemporalAligner:
             except Exception:
                 pass
             tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
+            eff_ws = week_start if week_start is not None else getattr(self, "week_start", 0)
             # map target to pandas freq code
             if any(x in tf for x in ("d", "day")):
                 pd_freq = "D"
             elif "w" in tf:
-                pd_freq = "W"
+                anchor = self._week_anchor_from_offset(eff_ws)
+                pd_freq = f"W-{anchor}"
             elif any(x in tf for x in ("mo", "month", "m")) and "q" not in tf:
                 pd_freq = "MS"
             elif "q" in tf:
@@ -670,7 +701,8 @@ class TemporalAligner:
 
         # Use dates when available to pick correct multiplier (e.g. Q->M is 3 not 12)
         date_series = df[datetime_col] if datetime_col in df.columns else None
-        lengths = self._compute_high_lengths(date_series, self.target_freq)
+        ws_for_compute = getattr(self, "week_start", None)
+        lengths = self._compute_high_lengths(date_series, self.target_freq, week_start=ws_for_compute)
         self._high_lengths = np.asarray(lengths, dtype=int) if lengths else None
         n_high = int(np.sum(self._high_lengths)) if self._high_lengths is not None and len(self._high_lengths) > 0 else (n_low * self._infer_ratio(date_series, self.target_freq))
         self._n_high = n_high
@@ -894,26 +926,22 @@ class TemporalAligner:
         n_l = self._n_low
         C = self._C
         mname = getattr(self, "method", "denton").lower()
-
-        # Use second differences for denton/denton-cholette to be smoother than uniform/linear.
-        # (first order pure min-diff s.t. block sums => exactly uniform/constant per block)
-        if "first" in mname:
-            D = np.eye(n_h) - np.eye(n_h, k=-1)
+        import scipy.sparse as sp
+        if "cholette" in mname:
+            D = sp.eye(n_h, format="csr") - sp.eye(n_h, k=-1, format="csr")
+            Qs = D.T @ D
+            # relax start for cholette
+            Qs = Qs.tolil()
+            Qs[0, :] = 0
+            Qs[:, 0] = 0
+            Qs[0, 0] = 1e-12
+            Qs = Qs.tocsr()
+        elif "first" in mname:
+            D = sp.eye(n_h, format="csr") - sp.eye(n_h, k=-1, format="csr")
+            Qs = D.T @ D
         else:
-            # second order (default for "smoother")
-            D = np.eye(n_h) - 2 * np.eye(n_h, k=-1) + np.eye(n_h, k=-2)
-        Q = D.T @ D
-
-        # Solve min y'Q y  s.t. C y = y_l   (Lagrange)
-        # [Q , C.T; C, 0] [y; lam] = [0; y_l]
-        K = n_h + n_l
-        A = np.zeros((K, K))
-        # regularize Q to avoid singularity for higher-order diff penalties / boundary
-        A[:n_h, :n_h] = Q + 1e-8 * np.eye(n_h)
-        A[:n_h, n_h:] = C.T
-        A[n_h:, :n_h] = C
-        b = np.zeros(K)
-        b[n_h:] = y_low
+            D = sp.eye(n_h, format="csr") - 2*sp.eye(n_h, k=-1, format="csr") + sp.eye(n_h, k=-2, format="csr")
+            Qs = D.T @ D
 
         # Build a preliminary series p by linear interp of block means (yl / m) placed at block ends.
         # Then solve for minimal-roughness adjustment e s.t. the sums are exact: C (p + e) = yl
@@ -925,21 +953,22 @@ class TemporalAligner:
         cp = C @ p
         delta = y_low - cp
 
-        # solve min e Q e s.t. C e = delta   (bordered system, regularized)
-        K = n_h + n_l
-        A = np.zeros((K, K))
-        A[:n_h, :n_h] = Q + 1e-8 * np.eye(n_h)
-        A[:n_h, n_h:] = C.T
-        A[n_h:, :n_h] = C
-        b = np.zeros(K)
-        b[n_h:] = delta
+        # sparse solve for the adjustment e (M2: fast for long series)
         try:
-            e = linalg.lstsq(A, b, cond=1e-12)[0][:n_h]
+            from scipy.sparse.linalg import spsolve
+            Qs2 = Qs + 1e-8 * sp.eye(n_h, format="csr")
+            Cs = sp.csr_matrix(C)
+            top = sp.hstack([Qs2, Cs.T])
+            bot = sp.hstack([Cs, sp.csr_matrix((n_l, n_l))])
+            As = sp.vstack([top, bot]).tocsr()
+            bs = np.concatenate([np.zeros(n_h), delta])
+            sol = spsolve(As, bs)
+            e = sol[:n_h] if sol is not None else np.zeros(n_h)
         except Exception:
             e = np.zeros(n_h)
         y_h = p + e
 
-        # final safety scale to enforce constraint exactly (within float)
+        # final safety scale
         current_agg = C @ y_h
         scale = np.ones_like(y_low, dtype=float)
         mask = np.abs(current_agg) > 1e-12
@@ -1222,6 +1251,8 @@ class TemporalAligner:
         col_semantics: dict[str, str] | None = None,
         default_semantics: Literal["stock", "flow"] = "flow",
         autodetect_semantics: bool = True,
+        week_start: str | None = None,
+        partial_weeks: Literal["keep", "drop"] | None = None,
         **fit_kwargs,
     ) -> pl.DataFrame:
         """Disaggregate multiple target columns from one low-frequency DataFrame.
@@ -1301,6 +1332,8 @@ class TemporalAligner:
         eff_map = dict(self.col_semantics or {})
         if col_semantics:
             eff_map.update(col_semantics)
+        eff_week_start = week_start
+        eff_partial = partial_weeks
 
         col_to_sem = {}
         for col in target_cols:
@@ -1314,6 +1347,13 @@ class TemporalAligner:
 
         self._detected_semantics = col_to_sem  # expose for inspection after call
 
+        # temp set week params for subcalls (fit/expand use self or passed)
+        old_ws = getattr(self, "week_start", None)
+        old_pw = getattr(self, "partial_weeks", None)
+        if eff_week_start is not None:
+            self.week_start = eff_week_start if isinstance(eff_week_start, int) else self._normalize_week_start(eff_week_start)
+        if eff_partial is not None:
+            self.partial_weeks = eff_partial
         # Fit structure once using first (will be overridden per col for agg)
         first_col = target_cols[0]
         first_sub = pdf.select([datetime_col, first_col])
@@ -1353,12 +1393,17 @@ class TemporalAligner:
 
         if include_dates and getattr(self, "_n_low", 0) > 0:
             low_dates = pdf[datetime_col]
-            high_dates = self.expand_high_freq_dates(low_dates)
+            high_dates = self.expand_high_freq_dates(low_dates, week_start=eff_week_start)
             n = out.height
             if len(high_dates) > n:
                 high_dates = high_dates.slice(0, n)  # accommodate "drop" which shortens
             out = out.with_columns(high_dates.alias("date")).select(["date", *target_cols])
 
+        # restore
+        if old_ws is not None:
+            self.week_start = old_ws
+        if old_pw is not None:
+            self.partial_weeks = old_pw
         return out
 
     def aggregate(
@@ -1371,6 +1416,8 @@ class TemporalAligner:
         default_semantics: Literal["stock", "flow"] = "flow",
         week_policy: Literal["week_end", "proportional"] = "week_end",
         autodetect_semantics: bool | None = None,
+        week_start: str | None = None,
+        partial_weeks: Literal["keep", "drop"] | None = None,
     ) -> pl.DataFrame:
         """Aggregate high-frequency data to lower frequency with calendar awareness.
 
@@ -1468,6 +1515,9 @@ class TemporalAligner:
         if datetime_col in high_df.columns:
             high_df = high_df.sort(datetime_col)
 
+        eff_week_start = self._normalize_week_start(week_start) if week_start is not None else getattr(self, "week_start", 0)
+        eff_partial_weeks = partial_weeks if partial_weeks is not None else getattr(self, "partial_weeks", "keep")
+
         # resolve per-col semantics (respect autodetect flag; default False -> "flow")
         num_cols = [
             c for c in high_df.columns
@@ -1534,7 +1584,7 @@ class TemporalAligner:
         else:
             pfreq = "M"
 
-        def _period_start(d: _date, pf: str) -> _date:
+        def _period_start(d: _date, pf: str, week_offset: int = 0) -> _date:
             """Return the start date of the containing target period (calendar)."""
             if pf == "Y":
                 return _date(d.year, 1, 1)
@@ -1544,8 +1594,9 @@ class TemporalAligner:
             if pf == "M":
                 return _date(d.year, d.month, 1)
             if pf == "W":
-                wd = d.weekday()  # Mon=0 ... Sun=6 ; matches common weekly starts
-                return d - _td(days=wd)
+                wd = d.weekday()  # Mon=0 ... Sun=6
+                days_back = (wd - week_offset) % 7
+                return d - _td(days=days_back)
             return d
 
         # accumulate (fixed logic for mass conservation on weeks)
@@ -1569,7 +1620,7 @@ class TemporalAligner:
             if not is_w or pol != "proportional":
                 # week_end (or any clean nesting): assign *once* to the representative period
                 assign_d = base + _td(days=6) if (is_w and pol == "week_end") else base
-                p = _period_start(assign_d, pfreq)
+                p = _period_start(assign_d, pfreq, eff_week_start)
                 if p not in seen:
                     seen.add(p)
                     period_list.append(p)
@@ -1590,7 +1641,7 @@ class TemporalAligner:
                 # proportional for flows on week straddles: split by synthetic days, fractions sum==1 per week
                 for k in range(span):
                     d = base + _td(days=k)
-                    p = _period_start(d, pfreq)
+                    p = _period_start(d, pfreq, eff_week_start)
                     if p not in seen:
                         seen.add(p)
                         period_list.append(p)
@@ -1609,6 +1660,30 @@ class TemporalAligner:
                                 if k == span - 1:
                                     acc["lastv"] = float(v)
                         # nans skipped for contrib; period gets value if >=1 finite child
+
+        # partial_weeks handling for weekly target (boundary incomplete weeks)
+        if pfreq == "W" and eff_partial_weeks is not None and period_list:
+            data_min = min(dts) if dts else None
+            data_max = max(dts) if dts else None
+            if data_min is not None and data_max is not None:
+                new_list = []
+                partials = []
+                for ii, p in enumerate(period_list):
+                    p_end = p + _td(days=6)
+                    is_partial = False
+                    if ii == 0 and data_min > p:
+                        is_partial = True
+                    if ii == len(period_list) - 1 and data_max < p_end:
+                        is_partial = True
+                    if is_partial:
+                        partials.append(p)
+                    if is_partial and eff_partial_weeks == "drop":
+                        continue
+                    new_list.append(p)
+                if partials and eff_partial_weeks == "keep":
+                    import warnings
+                    warnings.warn(f"Retaining partial weeks at boundaries: {[str(pp) for pp in partials]}", UserWarning, stacklevel=2)
+                period_list = new_list
 
         # build output (period start as native pl.Date)
         out_data = []
@@ -1631,7 +1706,8 @@ class TemporalAligner:
         return out
 
     def expand_high_freq_dates(
-        self, low_dates: pl.Series | list | Any, target_freq: str | None = None
+        self, low_dates: pl.Series | list | Any, target_freq: str | None = None,
+        week_start: str | None = None,
     ) -> pl.Series:
         """Expand low-frequency dates into the corresponding high-frequency date range.
 
@@ -1662,15 +1738,18 @@ class TemporalAligner:
         if n_low == 0:
             return pl.Series([], dtype=pl.Date)
 
+        eff_ws = week_start if week_start is not None else getattr(self, "week_start", None)
         # Use calendar-aware lengths for irregular so total n_high and dates reach true end
-        lengths = self._compute_high_lengths(low, target_freq)
+        lengths = self._compute_high_lengths(low, target_freq, week_start=eff_ws)
         n_high = int(np.sum(lengths)) if lengths else n_low * self._infer_ratio(low, target_freq)
         tf = (target_freq or self.target_freq or "1mo").lower()
+        eff_ws = week_start if week_start is not None else getattr(self, "week_start", 0)
         # proper target freq for date generation (no longer force "1mo" for q/y)
         if any(x in tf for x in ("d", "day")):
             pd_freq = "D"
         elif "w" in tf:
-            pd_freq = "W"
+            anchor = self._week_anchor_from_offset(eff_ws) if isinstance(eff_ws, int) else self._week_anchor_from_offset(self._normalize_week_start(eff_ws))
+            pd_freq = f"W-{anchor}"
         elif any(x in tf for x in ("mo", "month")) and "q" not in tf:
             pd_freq = "MS"
         elif "q" in tf:
@@ -1714,6 +1793,15 @@ class TemporalAligner:
             step_kind = "q"
         elif any(x in tf for x in ("y", "year")):
             step_kind = "y"
+        # normalize first date for weekly to respect week_start
+        if step_kind == "w":
+            off = getattr(self, "week_start", 0)
+            if isinstance(off, (str, type(None))):
+                off = self._normalize_week_start(off) if off else 0
+            if isinstance(cur, _date):
+                wd = cur.weekday()
+                cur = cur - _td(days=(wd - off) % 7)
+                dates_py[-1] = cur
         for _ in range(1, n_high):
             if step_kind == "mo":
                 y, m, d = cur.year, cur.month, cur.day

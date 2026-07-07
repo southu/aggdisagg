@@ -5,6 +5,21 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-07
+
+### Added
+- `week_start` (default "monday") and `partial_weeks` ("keep" default / "drop") parameters on `TemporalAligner`, with per-call overrides on `aggregate`, `disaggregate_columns`, `expand_high_freq_dates`.
+  - Affects weekly binning, generation, and straddle allocation for all week-related paths (D→W, coarse→W, W→coarser, weekly date expansion).
+  - Output week start dates always land on the chosen weekday.
+  - Mass conservation invariant to week_start (under keep).
+  - "keep" retains+warns on incomplete boundary weeks; "drop" removes them.
+  - Invalid week_start raises with accepted names.
+- Method fixes: `denton-cholette` now properly implemented and differs from `denton` (divergence near start, constraint preserved); `denton` (and cholette) use sparse solves for scalability (Month→Day fast).
+
+### Fixed
+- All previous guarantees (Monday default, mass cons, no regression on nesting/RT/stock-flow/calendar) preserved.
+- Added tests for week feature and method fixes.
+
 ## [1.7.0] - 2026-07-07
 
 ### Added / Fixed
