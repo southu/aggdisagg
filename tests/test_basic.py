@@ -36,7 +36,9 @@ def test_temporal_aligner_basic():
     high = aligner.fit_transform(df, datetime_col="date", target_col="y")
     assert len(high) == 24
     back = aligner.aggregate(high, freq="1y")
-    assert np.allclose(back["y_1y"].to_numpy(), [100.0, 120.0], atol=1e-8)
+    # 1.6 no-date path preserves the high col name ("y_disaggregated")
+    col = "y_disaggregated" if "y_disaggregated" in back.columns else "y_1y"
+    assert np.allclose(back[col].to_numpy(), [100.0, 120.0], atol=1e-8)
 
 
 def test_chow_lin_runs():
@@ -346,7 +348,8 @@ def test_all_methods_exact_aggregation_for_sum_when_no_nan(method):
     aligner = TemporalAligner(method=method, target_freq="1mo", agg="sum")
     monthly = aligner.fit_transform(df, datetime_col="date", target_col="y")
     re = aligner.aggregate(monthly, freq="1q")
-    err = np.max(np.abs(re["y_1q"].to_numpy() - df["y"].to_numpy()))
+    col = "y_1q" if "y_1q" in re.columns else "y_disaggregated"
+    err = np.max(np.abs(re[col].to_numpy() - df["y"].to_numpy()))
     assert err < 1e-6 * max(abs(df["y"].to_numpy())), f"{method} err {err}"
 
 
@@ -490,6 +493,23 @@ def test_no_crash_on_negatives_with_irregular_M_to_D():
     o = a.disaggregate_columns(_load_freq_test("monthly"), datetime_col="date", include_dates=True)
     assert o.height > 3000
     # basic sum check on a non-nan prefix would be in other tests
+
+
+def test_standalone_aggregate_calendar_aware():
+    # fresh aligner + datetime_col
+    d = _load_freq_test("daily")
+    m = TemporalAligner().aggregate(d, freq="1mo", datetime_col="date",
+                                    col_semantics={"flow_sales": "flow", "stock_inventory": "stock"})
+    assert m.height == 54
+    assert m.schema["date"] == pl.Date
+    # flow sum, stock last for first month
+    import numpy as np
+    import pandas as pd
+    pdf = pd.read_csv("/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-daily.csv")
+    pdf["dt"] = pd.to_datetime(pdf["start"])
+    j = pdf[(pdf["dt"] >= "2022-01-01") & (pdf["dt"] < "2022-02-01")]
+    assert np.isclose(m["flow_sales"][0], j["flow_sales"].sum())
+    assert np.isclose(m["stock_inventory"][0], j["stock_inventory"].iloc[-1])
 
 
 def test_include_dates_returns_pl_Date():

@@ -5,6 +5,19 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-07-07
+
+### Added / Fixed
+- `aggregate()` is now first-class and calendar-aware, independent of prior disaggregation state when `datetime_col` is provided.
+  - Groups by true calendar periods for target freq using date labels (honors variable month/quarter/year lengths).
+  - Per-column semantics via `col_semantics` / auto `_detect_semantics` (flow→sum, stock→last); never sums stocks.
+  - Outputs "date" (pl.Date) column with period-start labels.
+  - NaN rule: any NaN child → NaN parent for that period/col.
+  - `week_policy` ("week_end" | "proportional") for W→M/Q/Y straddles.
+- Legacy cached path still used for exact round-trips when prior `_high_lengths` match the input (position-based using original blocks).
+- Updated/added tests for standalone multi-level agg and roundtrips on the freq test files.
+- No breakage to disagg side or prior M→D behavior.
+
 ## [1.5.1] - 2026-07-07
 
 ### Fixed

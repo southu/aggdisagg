@@ -1214,56 +1214,207 @@ class TemporalAligner:
 
         return out
 
-    def aggregate(self, high_df: pl.DataFrame, freq: str = "1y", target_col: str = "y_disaggregated") -> pl.DataFrame:
-        """Symmetric aggregation back to lower frequency.
+    def aggregate(
+        self,
+        high_df: pl.DataFrame,
+        freq: str = "1y",
+        datetime_col: str = "date",
+        target_col: str = "y_disaggregated",
+        col_semantics: dict[str, str] | None = None,
+        default_semantics: Literal["stock", "flow"] = "flow",
+        week_policy: Literal["week_end", "proportional"] = "week_end",
+    ) -> pl.DataFrame:
+        """Aggregate high-frequency data to lower frequency with calendar awareness.
 
-        Supports both the classic single-column output from fit_transform (column "y_disaggregated"
-        or explicit target_col) and the multi-column output from disaggregate_columns (where
-        columns keep their original target names).
+        Standalone (fresh aligner) or after disaggregation. Uses actual calendar
+        boundaries for the target freq. Respects stock/flow semantics per column.
+
+        Parameters
+        ----------
+        high_df : pl.DataFrame
+            High-frequency observations.
+        freq : str
+            Target low frequency: "1y", "1q", "1mo", "1w".
+        datetime_col : str
+            Name of the datetime column in high_df (e.g. "date"). Required for
+            calendar-correct grouping on fresh aligners or when dates are present.
+        target_col : str
+            Legacy single-col name (used only in no-datetime fallback paths).
+        col_semantics, default_semantics :
+            Per-column "stock" (use last) or "flow" (sum). Auto-detected if not provided.
+        week_policy : {"week_end", "proportional"}
+            For weekly input to month/quarter/year:
+            - "week_end": assign whole week to the period containing its end date.
+            - "proportional": split flow weeks by overlapping days; stocks use week-end.
+            Other nestings (daily->*, month->q/y, q->y) require no special policy.
+
+        Returns
+        -------
+        pl.DataFrame
+            Aggregated data with original column names + a "date" column (pl.Date)
+            representing the start of each target period. Group counts are calendar-correct.
         """
-        if self._C is None or self._n_low == 0:
-            # fallback using inferred ratio (best effort without dates)
-            ratio = self._infer_ratio(None, self.target_freq)
-            n = len(high_df)
-            m = ratio if ratio > 0 else 1
-            n_low = max(1, n // m)
-            lens = getattr(self, "_high_lengths", None)
-            if target_col in high_df.columns:
-                y_h = high_df[target_col].to_numpy()
-                y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low, lens)
-                return pl.DataFrame({f"y_{freq}": y_l})
-            else:
-                # multi-col: aggregate every numeric column, keep names
+        lens = getattr(self, "_high_lengths", None)
+        last_aggs = getattr(self, "_last_disagg_aggs", {})
+        n_high_cur = len(high_df)
+
+        # Prefer cached positional blocks from prior disagg for exact roundtrips (even if dates present)
+        if lens is not None and int(np.sum(lens)) == n_high_cur:
+            num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
+            res = {}
+            for c in num_cols:
+                agg_c = last_aggs.get(c, getattr(self, "agg", "sum"))
+                y_h = high_df[c].to_numpy()
+                y_l = _aggregate_groups(y_h, agg_c, None, lens)
+                res[c] = y_l
+            if datetime_col in high_df.columns:
+                dts = high_df[datetime_col].to_list()
+                p_dates = []
+                pos = 0
+                for ll in lens:
+                    p_dates.append(dts[pos] if ll > 0 and pos < len(dts) else None)
+                    pos += ll
+                res_dict = {"date": p_dates}
+                res_dict.update(res)
+                return pl.DataFrame(res_dict)
+            # legacy name for y_disagg single col
+            if list(res.keys()) == ["y_disaggregated"]:
+                return pl.DataFrame({f"y_{freq}": res["y_disaggregated"]})
+            return pl.DataFrame(res)
+
+        # --- no date col: legacy/crude ---
+        if datetime_col not in high_df.columns:
+            if lens is not None:
+                # (should have been caught above, but)
                 num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
                 res = {}
                 for c in num_cols:
+                    agg_c = last_aggs.get(c, getattr(self, "agg", "sum"))
                     y_h = high_df[c].to_numpy()
-                    y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low, lens)
+                    y_l = _aggregate_groups(y_h, agg_c, None, lens)
                     res[c] = y_l
                 return pl.DataFrame(res)
+            # crude
+            ratio = self._infer_ratio(None, self.target_freq) or 12
+            n = n_high_cur
+            n_low = max(1, n // ratio)
+            if target_col in high_df.columns:
+                y_h = high_df[target_col].to_numpy()
+                y_l = y_h[:n_low] if n_low > 0 else np.array([])
+                return pl.DataFrame({f"y_{freq}": y_l})
+            else:
+                num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
+                res = {c: high_df[c].to_numpy()[:n_low] for c in num_cols}
+                return pl.DataFrame(res)
 
-        if target_col in high_df.columns:
-            y_h = high_df[target_col].to_numpy()
-            n_l = getattr(self, "_n_low", 0)
-            lens = getattr(self, "_high_lengths", None)
-            y_l = _aggregate_groups(y_h, self.agg, n_l, lens)
-            return pl.DataFrame({f"y_{freq}": y_l})
+        # --- full calendar-aware path ---
+        pdf = high_df.to_pandas().copy()
+        pdf["_dt"] = pd.to_datetime(pdf[datetime_col])
+        pdf = pdf.sort_values("_dt").reset_index(drop=True)
+
+        # infer input granularity for span (daily vs weekly etc.)
+        if len(pdf) > 1:
+            deltas = pdf["_dt"].diff().dt.days.dropna()
+            med_delta = deltas.median() if len(deltas) > 0 else 1
         else:
-            # multi-column case: aggregate each numeric column, preserve names
-            num_cols = [c for c in high_df.columns if str(high_df[c].dtype).lower().startswith(("float", "int"))]
-            res = {}
-            orig_agg = self.agg
-            last_aggs = getattr(self, "_last_disagg_aggs", {})
+            med_delta = 1
+        if med_delta <= 1.5:
+            default_span = 1
+        elif med_delta <= 8:
+            default_span = 7
+        else:
+            default_span = None  # monthly+ ; treat as point at label for assignment
+
+        # target pandas period freq
+        f = freq.lower().replace("1", "")
+        if f.startswith("y") or f.startswith("a"):
+            pfreq = "Y"
+        elif f.startswith("q"):
+            pfreq = "Q"
+        elif f.startswith("m"):
+            pfreq = "M"
+        elif f.startswith("w"):
+            pfreq = "W"
+        else:
+            pfreq = "M"
+
+        # resolve per-col semantics (flow=sum, stock=last)
+        num_cols = [
+            c for c in high_df.columns
+            if c != datetime_col and str(high_df[c].dtype).lower().startswith(("float", "int"))
+        ]
+        eff_map = dict(getattr(self, "col_semantics", {}) or {})
+        if col_semantics:
+            eff_map.update(col_semantics)
+        col_to_sem = {}
+        for c in num_cols:
+            if c in eff_map:
+                col_to_sem[c] = eff_map[c]
+            else:
+                y = high_df[c].to_numpy().astype(float)
+                col_to_sem[c] = self._detect_semantics(y)
+
+        # accumulate per period
+        from collections import defaultdict
+        period_acc: dict = defaultdict(
+            lambda: {c: {"sumv": 0.0, "lastv": None, "has_nan": False} for c in num_cols}
+        )
+        period_list = []  # ordered periods
+        seen = set()
+
+        for i in range(len(pdf)):
+            base = pdf["_dt"].iloc[i]
+            vals = {c: pdf[c].iloc[i] for c in num_cols}
+            span = default_span if default_span is not None else 1
+            is_week_input = (span == 7)
+
+            for k in range(span):
+                d = base + pd.Timedelta(days=k)
+                p = d.to_period(pfreq)
+                pkey = str(p)
+                if pkey not in seen:
+                    seen.add(pkey)
+                    period_list.append(p)
+
+                for c in num_cols:
+                    v = vals[c]
+                    is_flow = col_to_sem.get(c, default_semantics) == "flow"
+                    finite = pd.notna(v) and np.isfinite(v)
+                    acc = period_acc[pkey][c]
+                    if not finite:
+                        acc["has_nan"] = True
+                    if is_flow:
+                        # proportional only for week straddles when policy says so
+                        if is_week_input and week_policy == "proportional":
+                            contrib = (v / span) if span > 0 and finite else 0.0
+                            acc["sumv"] += contrib
+                        else:
+                            # whole (for clean or week_end policy)
+                            if finite:
+                                acc["sumv"] += v
+                    else:
+                        # stock: assign to end of this high's span
+                        if k == span - 1 and finite:
+                            acc["lastv"] = v
+
+        # build output rows (use period start as the "date")
+        out_data = []
+        for p in period_list:
+            row = {"date": p.start_time.date()}
             for c in num_cols:
-                agg_c = last_aggs.get(c, self.agg)
-                self.agg = agg_c
-                y_h = high_df[c].to_numpy()
-                n_l = getattr(self, "_n_low", 0)
-                lens = getattr(self, "_high_lengths", None)
-                y_l = _aggregate_groups(y_h, agg_c, n_l, lens)
-                res[c] = y_l
-            self.agg = orig_agg
-            return pl.DataFrame(res)
+                acc = period_acc[str(p)][c]
+                if acc["has_nan"]:
+                    row[c] = np.nan
+                elif col_to_sem.get(c, default_semantics) == "flow":
+                    row[c] = acc["sumv"]
+                else:
+                    row[c] = acc["lastv"]
+            out_data.append(row)
+
+        out = pl.DataFrame(out_data)
+        if "date" in out.columns:
+            out = out.with_columns(pl.col("date").cast(pl.Date))
+        return out
 
     def expand_high_freq_dates(
         self, low_dates: pl.Series | list | Any, target_freq: str | None = None
