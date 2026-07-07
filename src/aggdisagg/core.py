@@ -468,8 +468,15 @@ class TemporalAligner:
 
         self.fit(df, datetime_col, target_col)
         y_low = self._low_y
-        n_low = self._n_low
-        ratio = self._n_high // n_low
+        n_low = self._n_low or 0
+        n_high = getattr(self, "_n_high", 0) or 0
+        ratio = n_high // n_low if n_low else 0
+        if n_low == 0:
+            # early return clean empty for zero-length input
+            high_df = pl.DataFrame({"y_disaggregated": np.array([], dtype=float)})
+            if is_lazy:
+                high_df = high_df.lazy()
+            return high_df
 
         # Collect predictions from methods for ensemble if requested
         predictions = []
