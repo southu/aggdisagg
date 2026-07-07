@@ -292,14 +292,16 @@ class TemporalAligner:
                         raise KeyError(f"target_col '{target_col}' not found")  # pragma: no cover
                 df = pl.from_pandas(df)
 
-        if pd is not None and isinstance(df, pd.Series) and isinstance(df.index, pd.DatetimeIndex):
-            # pandas Series with DatetimeIndex
+        if pd is not None and isinstance(df, pd.Series):
+            # pandas Series (DTI or not) - support for itype pandas_series in tests and general use
             pdf = df.reset_index()
-            datetime_col = pdf.columns[0]
-            if len(pdf.columns) > 1:
+            if len(pdf.columns) >= 1:
+                datetime_col = pdf.columns[0]
+            if len(pdf.columns) >= 2:
                 target_col = pdf.columns[1]
             else:
-                raise KeyError("target_col not found in series reset")
+                # series with no index name, values are the target
+                target_col = "y" if "y" in pdf.columns else pdf.columns[0]
             df = pl.from_pandas(pdf)
 
         if datetime_col not in df.columns:
