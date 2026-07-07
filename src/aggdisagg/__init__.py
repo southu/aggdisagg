@@ -8,17 +8,18 @@ Main entrypoint:
 
 from __future__ import annotations
 
-__version__ = "1.4.2"
+__version__ = "1.5.0"
 
 # Backwards compatible convenience (optional)
 from .api import AggDisaggModel, aggregate, disaggregate
 from .conversion import Conversion, make_aggregation_matrix
-from .core import TemporalAligner
+from .core import IrregularRatioError, TemporalAligner
 from .methods import Method
 
 __all__ = [
     "AggDisaggModel",
     "Conversion",
+    "IrregularRatioError",
     "Method",
     "TemporalAligner",
     "aggregate",

@@ -12,6 +12,7 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 from typing import Any, Literal
 
@@ -31,13 +32,47 @@ except ImportError:  # pragma: no cover
 
 from .conversion import Conversion, make_aggregation_matrix
 
-__all__ = ["Conversion", "TemporalAligner", "_build_c_matrix", "make_aggregation_matrix"]  # internal ok
+__all__ = ["Conversion", "IrregularRatioError", "TemporalAligner", "_build_c_matrix", "make_aggregation_matrix"]  # internal ok
 
 
-def _build_c_matrix(n_high: int, n_low: int, agg: str) -> np.ndarray:
-    """Build aggregation matrix C (n_low x n_high) such that y_low = C @ y_high"""
+class IrregularRatioError(ValueError):
+    """Raised for low->high frequency pairs that cannot be disaggregated with calendar-accurate variable ratios."""
+    pass
+
+
+def _build_c_matrix(n_high: int, n_low: int, agg: str, lengths: np.ndarray | list[int] | None = None) -> np.ndarray:
+    """Build aggregation matrix C (n_low x n_high) such that y_low = C @ y_high.
+
+    Supports variable per-group lengths for irregular/calendar ratios (e.g. monthly->daily).
+    """
     if n_low == 0:
         return np.zeros((0, n_high or 0), dtype=float)
+    if lengths is not None:
+        lengths = np.asarray(lengths, dtype=int)
+        if len(lengths) != n_low:
+            raise ValueError("lengths length must match n_low")
+        calc_nh = int(np.sum(lengths))
+        if n_high != calc_nh:
+            # allow caller to pass approximate n_high; use calc
+            n_high = calc_nh
+        C = np.zeros((n_low, n_high))
+        pos = 0
+        for i, m in enumerate(lengths):
+            if m <= 0:
+                continue
+            if agg == "sum":
+                C[i, pos:pos + m] = 1.0
+            elif agg in ("mean", "avg"):
+                C[i, pos:pos + m] = 1.0 / m
+            elif agg == "first":
+                C[i, pos] = 1.0
+            elif agg == "last":
+                C[i, pos + m - 1] = 1.0
+            else:
+                raise ValueError(f"Unknown agg: {agg}")
+            pos += m
+        return C
+    # regular uniform case
     if n_high % n_low != 0:
         raise ValueError("n_high must be multiple of n_low for regular frequencies")
     m = n_high // n_low
@@ -98,16 +133,43 @@ def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> 
     return y_high
 
 
-def _aggregate_groups(y_h: np.ndarray, agg: str, n_low: int | None = None) -> np.ndarray:
+def _aggregate_groups(y_h: np.ndarray, agg: str, n_low: int | None = None, lengths: np.ndarray | list[int] | None = None) -> np.ndarray:
     """Per low-frequency group aggregation that is NaN-safe.
 
     A resulting low value is NaN only if its corresponding high-frequency window
     contains at least one NaN. Finite groups produce exact aggregates.
 
+    Supports variable group sizes (irregular ratios) via lengths.
     This prevents a single NaN (anywhere) from poisoning the entire output via
     0 * NaN == NaN in a full C @ y_h matrix multiply.
     """
     n_high = len(y_h)
+    if lengths is not None:
+        lengths = np.asarray(lengths, dtype=int)
+        n_low = len(lengths)
+        if n_high == 0 or n_low == 0:
+            return np.array([], dtype=float)
+        y_l = np.empty(n_low, dtype=float)
+        pos = 0
+        for i, m in enumerate(lengths):
+            g = y_h[pos: pos + m]
+            pos += m
+            if len(g) == 0 or not np.all(np.isfinite(g)):
+                y_l[i] = np.nan
+            else:
+                if agg == "sum":
+                    y_l[i] = g.sum()
+                elif agg in ("mean", "avg"):
+                    y_l[i] = g.mean()
+                elif agg == "first":
+                    y_l[i] = g[0]
+                elif agg == "last":
+                    y_l[i] = g[-1]
+                else:
+                    y_l[i] = g.sum()
+        return y_l
+
+    # fixed size fallback
     if n_high == 0:
         n_low = n_low or 0
         return np.full(n_low, np.nan, dtype=float) if n_low else np.array([], dtype=float)
@@ -121,8 +183,6 @@ def _aggregate_groups(y_h: np.ndarray, agg: str, n_low: int | None = None) -> np
             m = 1
             n_low = n_high
         elif m * n_low != n_high:
-            # length does not evenly divide the hinted n_low (e.g. dropped trailing groups)
-            # recompute n_low from this m so we cover exactly what high provides
             n_low = n_high // m
 
     y_l = np.empty(n_low, dtype=float)
@@ -269,6 +329,7 @@ class TemporalAligner:
         self._C: np.ndarray | None = None
         self._n_low: int = 0
         self._n_high: int = 0
+        self._high_lengths: np.ndarray | None = None
         self._beta: np.ndarray | None = None
         self._fitted_rho: float | None = None
         self._low_y: np.ndarray | None = None
@@ -394,6 +455,61 @@ class TemporalAligner:
             ratio = 30
         return ratio
 
+    def _compute_high_lengths(self, low_dates: Any, target_freq: str | None = None) -> list[int]:
+        """Calendar-aware per-low-period high-freq counts (variable lengths).
+
+        For monthly low dates + target_freq daily, returns the real number of days in each
+        month (28-31) based on the date's year/month. This prevents fixed-ratio force-fitting.
+        Falls back to repeated scalar ratio for regular/unsupported cases.
+        """
+        tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
+        wants_daily = "d" in tf or "day" in tf
+        if low_dates is None:
+            return []
+        try:
+            if isinstance(low_dates, pl.Series):
+                dlist = low_dates.to_list()
+            elif isinstance(low_dates, (list, tuple)):
+                dlist = list(low_dates)
+            else:
+                dlist = []
+            n = len(dlist)
+            if n == 0:
+                return []
+            if wants_daily and pd is not None:
+                try:
+                    dpd = pd.to_datetime(dlist, errors="coerce")
+                    # detect if the low periods are month-granularity
+                    low_f = None
+                    if len(dpd.dropna()) >= 2:
+                        try:
+                            low_f = pd.infer_freq(dpd.dropna())
+                        except Exception:
+                            low_f = None
+                    if low_f is None:
+                        try:
+                            delta = (dpd.dropna().iloc[1] - dpd.dropna().iloc[0]).days
+                            if 20 < delta <= 40:
+                                low_f = "M"
+                        except Exception:
+                            pass
+                    if low_f and "M" in str(low_f).upper():
+                        lens = []
+                        for ts in dpd:
+                            if pd.isna(ts):
+                                lens.append(30)
+                            else:
+                                lens.append(calendar.monthrange(ts.year, ts.month)[1])
+                        return lens
+                except Exception:
+                    pass
+            # regular or unsupported: fixed ratio repeated (may raise later for some irregular)
+            r = self._infer_ratio(low_dates, target_freq)
+            return [int(r)] * n
+        except Exception:
+            r = self._default_ratio(target_freq)
+            return [int(r)] * (len(dlist) if "dlist" in locals() else 0)
+
     def _prepare_data(
         self, df: pl.DataFrame, datetime_col: str = "date", target_col: str = "y"
     ) -> tuple[np.ndarray, np.ndarray, int]:
@@ -408,6 +524,7 @@ class TemporalAligner:
         if n_low == 0:
             # empty input: set trivial state, return empty high
             self._n_high = 0
+            self._high_lengths = np.array([], dtype=int)
             self._C = np.zeros((0, 0), dtype=float)
             self._X_high = np.zeros((0, 1), dtype=float)
             self._low_y = y_low
@@ -416,15 +533,16 @@ class TemporalAligner:
 
         # Use dates when available to pick correct multiplier (e.g. Q->M is 3 not 12)
         date_series = df[datetime_col] if datetime_col in df.columns else None
-        ratio = self._infer_ratio(date_series, self.target_freq)
-
-        n_high = n_low * ratio
+        lengths = self._compute_high_lengths(date_series, self.target_freq)
+        self._high_lengths = np.asarray(lengths, dtype=int) if lengths else None
+        n_high = int(np.sum(self._high_lengths)) if self._high_lengths is not None and len(self._high_lengths) > 0 else (n_low * self._infer_ratio(date_series, self.target_freq))
         self._n_high = n_high
 
         # Build X_high
+        rep = self._high_lengths if self._high_lengths is not None else self._infer_ratio(date_series, self.target_freq)
         if self.indicator_cols and all(c in df.columns for c in self.indicator_cols):
             X = df.select(self.indicator_cols).to_numpy().astype(float)
-            X_high = np.repeat(X, ratio, axis=0)
+            X_high = np.repeat(X, rep, axis=0)
         else:
             X_high = np.ones((n_high, 1))
 
@@ -434,7 +552,8 @@ class TemporalAligner:
 
         self._X_high = X_high
         self._low_y = y_low
-        self._C = _build_c_matrix(n_high, n_low, self.agg)
+        lengths_arg = self._high_lengths if self._high_lengths is not None else None
+        self._C = _build_c_matrix(n_high, n_low, self.agg, lengths_arg)
         return y_low, X_high, n_high
 
     def fit(self, df: Any, datetime_col: str = "date", target_col: str = "y") -> TemporalAligner:
@@ -554,14 +673,21 @@ class TemporalAligner:
         self._fit_chow_lin(y_low, X_high)
 
     def _apply_simple(self, y_low: np.ndarray, n_high: int) -> np.ndarray:
+        lengths = getattr(self, "_high_lengths", None)
+        n_l = len(y_low)
+        if lengths is not None and len(lengths) == n_l:
+            freqs = np.asarray(lengths, dtype=int)
+        else:
+            freq = n_high // n_l if n_l else 1
+            freqs = np.full(n_l, freq, dtype=int)
         if self.method == "uniform":
-            freq = n_high // len(y_low)
             if self.agg in ("sum", "mean"):
-                return np.repeat(y_low / freq, freq)
-            return np.repeat(y_low, freq)  # pragma: no cover
+                parts = [np.full(ll, (y_low[i] / ll) if ll > 0 else 0.0) for i, ll in enumerate(freqs)]
+                return np.concatenate(parts) if parts else np.array([], dtype=float)
+            return np.repeat(y_low, freqs)
         elif self.method == "linear":
-            x = np.arange(len(y_low))
-            x_new = np.linspace(0, len(y_low)-1, n_high)
+            x = np.arange(n_l)
+            x_new = np.linspace(0, n_l - 1, n_high)
             # Bridge NaNs with last valid *only* for interp to avoid np.interp leaking NaN into prior valid blocks;
             # then force NaN on the original nan-low blocks so missing inputs stay honest (or get filled by policy later).
             y_low_for_ip = np.asarray(y_low, dtype=float).copy()
@@ -572,11 +698,12 @@ class TemporalAligner:
                 elif np.isfinite(last):
                     y_low_for_ip[i] = last
             yh = np.interp(x_new, x, y_low_for_ip)
-            n_l = len(y_low)
-            r = n_high // n_l if n_l else 1
-            for i in range(n_l):
+            # force nan blocks using variable freqs
+            pos = 0
+            for i, ll in enumerate(freqs):
                 if not np.isfinite(y_low[i]):
-                    yh[i * r : (i + 1) * r] = np.nan
+                    yh[pos : pos + ll] = np.nan
+                pos += ll
             if self.agg == "sum":
                 s = np.nansum(yh)
                 target = np.nansum(y_low)
@@ -586,7 +713,7 @@ class TemporalAligner:
                 target_m = np.nanmean(y_low)
                 yh = yh * (target_m / m) if m != 0 and np.isfinite(m) else yh
             return yh
-        return np.repeat(y_low, n_high // len(y_low))
+        return np.repeat(y_low, freqs)
 
     def _apply_denton(self, y_low: np.ndarray) -> np.ndarray:
         """Denton quadratic minimization using Lagrange."""
@@ -620,7 +747,9 @@ class TemporalAligner:
         scale = np.ones_like(y_low, dtype=float)
         mask = np.abs(current_agg) > 1e-12
         scale[mask] = y_low[mask] / current_agg[mask]
-        y_h = y_h * np.repeat(scale, n_h // n_l)
+        lens = getattr(self, "_high_lengths", None)
+        rep = lens if lens is not None else (n_h // n_l if n_l else 1)
+        y_h = y_h * np.repeat(scale, rep)
         return y_h
 
     def transform(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -702,6 +831,7 @@ class TemporalAligner:
             ratio = n_high // n_low if n_low else 0
             if n_low == 0:
                 # early return clean empty for zero-length input
+                self._high_lengths = np.array([], dtype=int)
                 high_df = pl.DataFrame({"y_disaggregated": np.array([], dtype=float)})
                 if is_lazy:
                     high_df = high_df.lazy()
@@ -743,7 +873,9 @@ class TemporalAligner:
                     mask = np.abs(current) > 1e-12
                     safe = mask & np.isfinite(current) & np.isfinite(y_low)
                     factor[safe] = y_low[safe] / current[safe]
-                    y_h = y_h * np.repeat(factor, ratio)
+                    lens = getattr(self, "_high_lengths", None)
+                    rep = lens if lens is not None else ratio
+                    y_h = y_h * np.repeat(factor, rep)
 
             # Handle NaNs: distinguish NaN low-freq *input* (no anchor -> default honest NaN) vs genuine end-of-range.
             # extrapolate policy now defaults to "nan" (design fix); "hold"/"linear" fill when requested (incl. for missing inputs);
@@ -751,9 +883,11 @@ class TemporalAligner:
             had_nan = np.any(np.isnan(y_h))
             if had_nan or np.any(~np.isfinite(y_low)):
                 # map which high blocks come from NaN low inputs (reserved for future diagnostics)
-                if n_low > 0 and ratio > 0:
+                if n_low > 0:
                     low_nan = ~np.isfinite(y_low)
-                    _ = np.repeat(low_nan, ratio)  # computed for potential use / clarity
+                    lens = getattr(self, "_high_lengths", None)
+                    rep = lens if lens is not None else (ratio if "ratio" in locals() else 1)
+                    _ = np.repeat(low_nan, rep)  # computed for potential use / clarity
                 # (no else needed)
 
                 if self.extrapolate == "hold":
@@ -1010,9 +1144,10 @@ class TemporalAligner:
             n = len(high_df)
             m = ratio if ratio > 0 else 1
             n_low = max(1, n // m)
+            lens = getattr(self, "_high_lengths", None)
             if target_col in high_df.columns:
                 y_h = high_df[target_col].to_numpy()
-                y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low)
+                y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low, lens)
                 return pl.DataFrame({f"y_{freq}": y_l})
             else:
                 # multi-col: aggregate every numeric column, keep names
@@ -1020,14 +1155,15 @@ class TemporalAligner:
                 res = {}
                 for c in num_cols:
                     y_h = high_df[c].to_numpy()
-                    y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low)
+                    y_l = _aggregate_groups(y_h, getattr(self, "agg", "sum"), n_low, lens)
                     res[c] = y_l
                 return pl.DataFrame(res)
 
         if target_col in high_df.columns:
             y_h = high_df[target_col].to_numpy()
             n_l = getattr(self, "_n_low", 0)
-            y_l = _aggregate_groups(y_h, self.agg, n_l)
+            lens = getattr(self, "_high_lengths", None)
+            y_l = _aggregate_groups(y_h, self.agg, n_l, lens)
             return pl.DataFrame({f"y_{freq}": y_l})
         else:
             # multi-column case: aggregate each numeric column, preserve names
@@ -1040,7 +1176,8 @@ class TemporalAligner:
                 self.agg = agg_c
                 y_h = high_df[c].to_numpy()
                 n_l = getattr(self, "_n_low", 0)
-                y_l = _aggregate_groups(y_h, agg_c, n_l)
+                lens = getattr(self, "_high_lengths", None)
+                y_l = _aggregate_groups(y_h, agg_c, n_l, lens)
                 res[c] = y_l
             self.agg = orig_agg
             return pl.DataFrame(res)
@@ -1077,9 +1214,9 @@ class TemporalAligner:
         if n_low == 0:
             return pl.Series([], dtype=pl.Date)
 
-        # Use date-aware inference for correct expansion factor (Q->M =3, Y->M=12, etc.)
-        ratio = self._infer_ratio(low, target_freq)
-        n_high = n_low * ratio
+        # Use calendar-aware lengths for irregular (M->D etc) so total n_high and dates reach true end
+        lengths = self._compute_high_lengths(low, target_freq)
+        n_high = int(np.sum(lengths)) if lengths else n_low * self._infer_ratio(low, target_freq)
         tf = (target_freq or self.target_freq or "1mo").lower()
         high_interval = "1mo"
         if "d" in tf or "day" in tf:

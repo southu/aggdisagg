@@ -5,6 +5,21 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-07-07
+
+### Added
+- Full support for calendar-aware variable ratios on irregular pairs (notably monthly→daily). Each low period expands using its real number of high-frequency subperiods (actual days in month: 28-31). `C` matrices, value repeats, linear interp, date expansion, and group aggregation are now per-period instead of a single global integer ratio (no more force-fit to 30).
+- `IrregularRatioError` exception for unsupported irregular frequency pairs (instead of silent wrong fixed-ratio results).
+
+### Fixed
+- **Irregular ratio silent correctness bug (HIGH)**: monthly→daily used fixed ratio=30 for all months → wrong total count (2340 instead of ~2373), drift (values assigned to wrong calendar days, e.g. Jan 2026 value on Dec 2025), and truncated last month. Now produces exact calendar days, dates align 1:1 with values, last date is true end of final period (e.g. 2026-06-30), and stock anchors land on actual month-end dates.
+  - Affects `_infer`/`_compute_high_lengths`, `_prepare_data`, `_build_c_matrix`, `_apply_*`, `_aggregate_groups`, `expand_high_freq_dates`, scaling, nan handling, include_dates, denton etc.
+- Added regression test verifying per-calendar-month daily row count equals real days in month + end-of-month anchor placement.
+- Repro verification now passes: 2373 rows, ends 2026-06-30, zero drift on anchors.
+
+### Changed
+- Ratio handling for irregular cases is no longer silently approximate; this is a visible behavior change for M→D (and similar) → version 1.5.0.
+
 ## [1.4.2] - 2026-07-07
 
 ### Fixed

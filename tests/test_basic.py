@@ -416,6 +416,41 @@ def test_aggregate_preserves_per_group_nan_from_incomplete_tail():
     assert np.isnan(r[~finite]).all()                         # only the last quarter NaN
 
 
+def test_monthly_to_daily_uses_variable_calendar_lengths_no_drift():
+    # 1.5.0 regression: monthly->daily must use real per-month day counts (not fixed 30),
+    # produce correct total rows, reach true end of last month, align values to calendar dates.
+    import numpy as np
+    # 3 months including leap Feb
+    df = pl.DataFrame({
+        "date": [date(2020,1,1), date(2020,2,1), date(2020,3,1)],
+        "flow": [310., 290., 310.],
+        "stock": [100., 101., 102.],
+    })
+    a = TemporalAligner(method="uniform", target_freq="1d", agg="sum")
+    daily = a.disaggregate_columns(df, datetime_col="date", include_dates=True)
+    d = daily["date"]
+    assert str(d.to_list()[-1]) == "2020-03-31"
+    assert daily.height == 31 + 29 + 31
+    # per-month row counts == real days
+    months = [(x.year, x.month) for x in d.to_list()]
+    from collections import Counter
+    cnt = Counter(months)
+    assert cnt[(2020,1)] == 31
+    assert cnt[(2020,2)] == 29
+    assert cnt[(2020,3)] == 31
+
+    # stock value anchors at true end of month
+    a2 = TemporalAligner(method="linear", target_freq="1d", agg="last")
+    daily2 = a2.disaggregate_columns(
+        df, datetime_col="date", include_dates=True,
+        col_semantics={"stock": "stock"}
+    )
+    d2 = daily2["date"].to_list()
+    cs = daily2["stock"].to_numpy()
+    feb_end = next(i for i, x in enumerate(d2) if str(x) == "2020-02-29")
+    assert np.isclose(cs[feb_end], 101.0)
+
+
 def test_include_dates_returns_pl_Date():
     # BUG5
     df = pl.DataFrame({"date": [date(2020,1,1), date(2020,4,1)], "y": [100., 200.]})
