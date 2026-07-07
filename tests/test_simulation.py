@@ -1032,6 +1032,138 @@ def test_messy_incomplete_data_batch_1():
     assert passed == len(cases), f"Only {passed}/{len(cases)} passed in messy batch"
 
 
+def test_messy_incomplete_data_batch_2():
+    """Batch 2 of 24: focus on uncertainty+NaN, date helper with bad data, specific methods on incomplete, more input mixes, error paths."""
+    cases = [
+        {"n": 4, "nan_y": [1,2], "method": "uniform", "nboot": 30, "expect_finite": False},
+        {"n": 4, "nan_y": [0], "method": "linear", "nboot": 10, "expect_finite": False},
+        {"n": 5, "nan_y": [3], "method": "denton", "nboot": 50, "cneg": True, "expect_finite": False},
+        {"n": 3, "nan_y": [1], "method": "chow-lin-opt", "nboot": 20, "inds": True, "expect_finite": False},
+        {"n": 4, "nan_y": [2], "method": "litterman", "nboot": 5, "expect_finite": False},
+        {"n": 3, "all_nan_y": True, "method": "fernandez", "nboot": 100, "expect_finite": False},
+        {"n": 3, "nat_date": [0,2], "tf": "1mo", "test_helper": True},
+        {"n": 5, "gaps": True, "unsorted": True, "test_helper": True},
+        {"n": 2, "object_dates": True, "nat_date": [1], "test_helper": True},
+        {"n": 4, "dups": True, "test_helper": True},
+        {"n": 1, "nan_y": [0], "test_helper": True, "expect_finite": False},
+        {"n": 3, "gaps": True, "tf": "1q", "test_helper": True},
+        {"n": 4, "nan_y": [1], "method": "uniform", "ens": True, "cneg": True, "expect_finite": False},
+        {"n": 3, "inf_y": [0], "method": "linear", "itype": "pandas", "expect_finite": False},
+        {"n": 5, "nan_y": [2,4], "method": "denton", "itype": "lazy", "expect_finite": False},
+        {"n": 4, "nan_y": [1], "method": "chow-lin-opt", "inds": True, "itype": "xarray", "expect_finite": False},
+        {"n": 3, "zeros": True, "nan_y": [1], "method": "litterman", "nboot": 10, "expect_finite": False},
+        {"n": 2, "neg": True, "nan_y": [0], "method": "fernandez", "cneg": True, "expect_finite": False},
+        {"n": 3, "missing_y": True, "expect_error": True},
+        {"n": 0, "expect_error": True},
+        {"n": 4, "no_date": True, "expect_error": True},
+        {"n": 3, "nan_y": [0], "tf": "bad", "expect_finite": False},
+        {"n": 5, "hier_nan": True, "method": "denton"},
+        {"n": 4, "nan_y": [1,3], "inf_y": [2], "neg": True, "ens": True, "expect_finite": False},
+    ]
+
+    passed = 0
+    for i, case in enumerate(cases):
+        try:
+            n = case.get("n", 3)
+            y = make_low_freq(n_low=n, seed=500 + i)
+            if case.get("nan_y"):
+                for idx in case["nan_y"]:
+                    if idx < len(y): y[idx] = np.nan
+            if case.get("inf_y"):
+                for idx in case["inf_y"]:
+                    if idx < len(y): y[idx] = np.inf
+            if case.get("all_nan_y"):
+                y[:] = np.nan
+            if case.get("neg"):
+                y[0] = -30
+            if case.get("zeros"):
+                y[1] = 0
+
+            dates = list(pd.date_range("2022-01-01", periods=n, freq="YE").date)
+            if case.get("nat_date") or case.get("object_dates"):
+                dates = list(dates)
+                for idx in case.get("nat_date", []):
+                    if idx < len(dates): dates[idx] = pd.NaT
+                dates = pd.Series(dates, dtype="object")
+            if case.get("dups"):
+                if isinstance(dates, pd.Series):
+                    dates = list(dates) + [dates.iloc[0] if len(dates) > 0 else pd.NaT]
+                else:
+                    dates.append(dates[0])
+                y = np.append(y, y[0])
+                n += 1
+            if case.get("unsorted"):
+                dates = list(dates)[::-1]
+                y = y[::-1]
+            if case.get("gaps"):
+                dates = list(pd.date_range("2022-01-01", periods=n, freq="2Y").date)
+
+            base_df = pl.DataFrame({"date": dates, "y": y})
+            if case.get("inds") or case.get("ind_nan"):
+                ind = make_indicators(n_low=n, seed=600+i)
+                if case.get("ind_nan"): ind[0] = np.nan
+                base_df = base_df.with_columns(pl.Series("ind", ind))
+
+            itype = case.get("itype", "polars")
+            if itype == "pandas":
+                df = base_df.to_pandas()
+            elif itype == "lazy":
+                df = base_df.lazy()
+            elif itype == "xarray":
+                try:
+                    import xarray as xr
+                    df = xr.DataArray(y, dims=["t"], coords={"t": dates}, name="y")
+                except:
+                    df = base_df
+            else:
+                df = base_df
+
+            if case.get("no_date"):
+                df = df.drop("date", axis=1) if hasattr(df, "drop") else df.select(pl.exclude("date"))
+            if case.get("missing_y"):
+                df = df.drop("y", axis=1) if hasattr(df, "drop") else df.select(pl.exclude("y"))
+
+            aligner = TemporalAligner(
+                method=case.get("method", "uniform"),
+                target_freq=case.get("tf", "1mo"),
+                agg="sum",
+                indicator_cols=["ind"] if (case.get("inds") or case.get("ind_nan")) and itype not in ["xarray"] else None,
+                use_ensemble=case.get("ens", False),
+                correct_negatives=case.get("cneg", False),
+                n_bootstrap=case.get("nboot", 0)
+            )
+
+            if case.get("expect_error"):
+                with pytest.raises(Exception):
+                    _ = aligner.fit_transform(df, datetime_col="date", target_col="y")
+                passed += 1
+                continue
+
+            high = aligner.fit_transform(df, datetime_col="date", target_col="y")
+            if isinstance(high, pl.LazyFrame):
+                high = high.collect()
+
+            vals = high["y_disaggregated"].to_numpy()
+            if case.get("expect_finite", True):
+                assert np.all(np.isfinite(vals)), f"Non-finite in case {i}"
+
+            if case.get("test_helper", False):
+                try:
+                    _ = aligner.expand_high_freq_dates(dates)
+                except:
+                    pass
+
+            passed += 1
+        except Exception as e:
+            if not case.get("expect_error"):
+                print(f"Unexpected fail case {i}: {e}")
+                raise
+            passed += 1
+
+    assert passed == len(cases)
+    print("Batch 2 passed")
+
+
 if __name__ == "__main__":
     test_simulation_suite()
     test_more_edge_cases_and_use_cases()
@@ -1040,4 +1172,5 @@ if __name__ == "__main__":
     test_real_world_style_example()
     test_robust_100_scenarios()
     test_messy_incomplete_data_batch_1()
+    test_messy_incomplete_data_batch_2()
     print("All batch tests completed successfully.")

@@ -97,7 +97,11 @@ def _ensemble_nnls(predictions: list[np.ndarray], C: np.ndarray, y_low: np.ndarr
     if len(predictions) == 1:
         return predictions[0]
     P = np.column_stack(predictions)
-    # Solve min ||C P w - y_low|| s.t. w >=0 , optionally sum w =1 but allow free
+    # Handle NaN/Inf gracefully for messy data
+    if np.any(~np.isfinite(P)) or np.any(~np.isfinite(y_low)):
+        # fallback to first prediction (or mean)
+        return predictions[0]
+    # Solve min ||C P w - y_low|| s.t. w >=0
     A = C @ P
     w, _ = optimize.nnls(A, y_low)
     # Use raw NNLS weights; the caller always re-enforces the exact aggregation
