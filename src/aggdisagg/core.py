@@ -12,7 +12,6 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Any, Literal
 
 import numpy as np
@@ -36,6 +35,8 @@ __all__ = ["Conversion", "TemporalAligner", "_build_c_matrix", "make_aggregation
 
 def _build_c_matrix(n_high: int, n_low: int, agg: str) -> np.ndarray:
     """Build aggregation matrix C (n_low x n_high) such that y_low = C @ y_high"""
+    if n_low == 0:
+        return np.zeros((0, n_high or 0), dtype=float)
     if n_high % n_low != 0:
         raise ValueError("n_high must be multiple of n_low for regular frequencies")
     m = n_high // n_low
@@ -230,6 +231,15 @@ class TemporalAligner:
         n_low = len(y_low)
         self._n_low = n_low
 
+        if n_low == 0:
+            # empty input: set trivial state, return empty high
+            self._n_high = 0
+            self._C = np.zeros((0, 0), dtype=float)
+            self._X_high = np.zeros((0, 1), dtype=float)
+            self._low_y = y_low
+            self._y_high = np.array([], dtype=float)
+            return y_low, self._X_high, 0
+
         # For skeleton: assume target_freq implies ratio. In real: use date ranges.
         ratio = 12
         tf = self.target_freq.lower()
@@ -285,7 +295,7 @@ class TemporalAligner:
             if len(pdf.columns) > 1:
                 target_col = pdf.columns[1]
             else:
-                raise KeyError(f"target_col not found in series reset")
+                raise KeyError("target_col not found in series reset")
             df = pl.from_pandas(pdf)
 
         if datetime_col not in df.columns:

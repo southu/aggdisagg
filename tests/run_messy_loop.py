@@ -4,8 +4,8 @@ Runs the 24-test batch repeatedly until clean run or 30 min timeout.
 Finds errors, but fixes are manual in src/ or test.
 """
 import subprocess
-import time
 import sys
+import time
 
 TEST = "tests/test_simulation.py::test_messy_incomplete_data_batch_1"
 TIMEOUT = 30 * 60  # 30 min
