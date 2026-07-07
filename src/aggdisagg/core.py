@@ -58,37 +58,41 @@ def _build_c_matrix(n_high: int, n_low: int, agg: str) -> np.ndarray:
 def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> np.ndarray:
     """Post-correction for negatives while preserving aggregation (proportional redistribution)."""
     y_high = y_high.copy()
-    neg_mask = y_high < 0
-    if not np.any(neg_mask):
-        return y_high  # pragma: no cover (common path covered elsewhere)
-    # For each low-freq group, redistribute negative mass (only when target low >=0)
-    n_low = len(y_low)
-    m = len(y_high) // n_low
-    for i in range(n_low):
-        start = i * m
-        end = start + m
-        if y_low[i] < 0:
-            # Negative aggregate target: allow negative high-freq values
-            continue
-        group = y_high[start:end]
-        negs = group < 0
-        if np.any(negs):
-            neg_sum = group[negs].sum()
-            pos_mask = ~negs
-            if np.any(pos_mask) and pos_mask.sum() > 0:
-                # proportional to positive parts
-                pos = group[pos_mask]
-                pos_sum = pos.sum()
-                if pos_sum > 0:
-                    group[pos_mask] += (neg_sum / pos_sum) * pos
-            group[negs] = 0
-            y_high[start:end] = group
-    # Re-enforce constraint
-    current = C @ y_high
-    factor = np.ones_like(y_low, dtype=float)
-    mask = np.abs(current) > 1e-12
-    factor[mask] = y_low[mask] / current[mask]
-    y_high = y_high * np.repeat(factor, m)
+    if not np.any(np.isfinite(y_high) & (y_high < 0)):
+        # no finite negatives or all nan -> skip correction to avoid warnings
+        return y_high
+    with np.errstate(invalid="ignore", divide="ignore"):
+        neg_mask = y_high < 0
+        if not np.any(neg_mask):
+            return y_high
+        # For each low-freq group, redistribute negative mass (only when target low >=0)
+        n_low = len(y_low)
+        m = len(y_high) // n_low if n_low else 1
+        for i in range(n_low):
+            start = i * m
+            end = start + m
+            if y_low[i] < 0:
+                # Negative aggregate target: allow negative high-freq values
+                continue
+            group = y_high[start:end]
+            negs = group < 0
+            if np.any(negs):
+                neg_sum = group[negs].sum()
+                pos_mask = ~negs
+                if np.any(pos_mask) and pos_mask.sum() > 0:
+                    pos = group[pos_mask]
+                    pos_sum = pos.sum()
+                    if pos_sum > 0:
+                        group[pos_mask] += (neg_sum / pos_sum) * pos
+                group[negs] = 0
+                y_high[start:end] = group
+        # Re-enforce constraint (nan/inf safe)
+        current = C @ y_high
+        factor = np.ones_like(y_low, dtype=float)
+        mask = np.abs(current) > 1e-12
+        safe = mask & np.isfinite(current) & np.isfinite(y_low)
+        factor[safe] = y_low[safe] / current[safe]
+        y_high = y_high * np.repeat(factor, m)
     return y_high
 
 
@@ -254,6 +258,10 @@ class TemporalAligner:
         return y_low, X_high, n_high
 
     def fit(self, df: Any, datetime_col: str = "date", target_col: str = "y") -> TemporalAligner:
+        # Validate method early (before data checks) so bad method raises ValueError even on incomplete df
+        allowed_methods = ("uniform", "linear", "denton", "denton-cholette", "chow-lin", "chow-lin-opt", "chowlin", "litterman", "litterman-opt", "fernandez")
+        if self.method not in allowed_methods:
+            raise ValueError(f"Unknown method: {self.method}")
         # Support pandas DatetimeIndex (wide or series)
         if pd is not None and isinstance(df, pd.DataFrame):
             if isinstance(df.index, pd.DatetimeIndex):
@@ -471,13 +479,15 @@ class TemporalAligner:
         else:
             y_h = predictions[0]
 
-        # Ensure exact aggregation
+        # Ensure exact aggregation (nan/inf safe for messy data cases)
         if self._C is not None:
-            current = self._C @ y_h
-            factor = np.ones_like(current)
-            mask = np.abs(current) > 1e-12
-            factor[mask] = y_low[mask] / current[mask]
-            y_h = y_h * np.repeat(factor, ratio)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                current = self._C @ y_h
+                factor = np.ones_like(current, dtype=float)
+                mask = np.abs(current) > 1e-12
+                safe = mask & np.isfinite(current) & np.isfinite(y_low)
+                factor[safe] = y_low[safe] / current[safe]
+                y_h = y_h * np.repeat(factor, ratio)
 
         # Negative correction
         if self.correct_negatives:
@@ -539,7 +549,8 @@ class TemporalAligner:
             return pl.DataFrame({f"y_{freq}": high_df[target_col].to_numpy()[:n_low]})
 
         y_h = high_df[target_col].to_numpy()
-        y_l = self._C @ y_h
+        with np.errstate(invalid="ignore", divide="ignore"):
+            y_l = self._C @ y_h
         return pl.DataFrame({f"y_{freq}": y_l})
 
     def expand_high_freq_dates(
