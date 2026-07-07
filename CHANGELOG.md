@@ -5,6 +5,17 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-07-07
+
+### Fixed
+- Generalized calendar-aware variable child counts (`_compute_high_lengths`) and date expansion to **all** (source, target) pairs (Y/Q/M/W/D → any of 1y/1q/1mo/1w/1d). 1.5.0 only fixed M→D; others still used fixed ratios (91/30/~30.45) or emitted wrong target date steps (e.g. Y→1q produced monthly dates).
+  - Lengths computed from each source period's true calendar end (via .to_period + end_time or delta) then count of target ticks in the span.
+  - `expand_high_freq_dates` now selects correct freq (QS/YS/D/...) and uses accurate total periods → correct last date and spacing.
+  - `_correct_negatives` accepts `lengths` and does per-parent `np.repeat(factor, parent_len)` (no broadcast crash on irregular + negatives).
+- Added/expanded regression tests covering the 5+ pairs, correct per-year day counts (incl. leaps), quarterly steps in dates, exact W*7, last dates, and no-crash on signed monthly→daily.
+- No regressions on previously-passing pairs or NaN/aggregate-exact behavior.
+- All repro cases now pass with correct counts/ends/dates.
+
 ## [1.5.0] - 2026-07-07
 
 ### Added

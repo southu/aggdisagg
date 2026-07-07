@@ -12,7 +12,6 @@ Uses numpy/scipy. Maintains exact aggregation via C matrix.
 
 from __future__ import annotations
 
-import calendar
 import contextlib
 from typing import Any, Literal
 
@@ -92,8 +91,11 @@ def _build_c_matrix(n_high: int, n_low: int, agg: str, lengths: np.ndarray | lis
     return C
 
 
-def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> np.ndarray:
-    """Post-correction for negatives while preserving aggregation (proportional redistribution)."""
+def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray, lengths: np.ndarray | list[int] | None = None) -> np.ndarray:
+    """Post-correction for negatives while preserving aggregation (proportional redistribution).
+
+    Supports variable per-low child counts (lengths) so that repeat(factor, m) works for irregular ratios.
+    """
     y_high = y_high.copy()
     if not np.any(np.isfinite(y_high) & (y_high < 0)):
         # no finite negatives or all nan -> skip correction to avoid warnings
@@ -104,32 +106,62 @@ def _correct_negatives(y_high: np.ndarray, C: np.ndarray, y_low: np.ndarray) -> 
             return y_high
         # For each low-freq group, redistribute negative mass (only when target low >=0)
         n_low = len(y_low)
-        m = len(y_high) // n_low if n_low else 1
-        for i in range(n_low):
-            start = i * m
-            end = start + m
-            if y_low[i] < 0:
-                # Negative aggregate target: allow negative high-freq values
-                continue
-            group = y_high[start:end]
-            negs = group < 0
-            if np.any(negs):
-                neg_sum = group[negs].sum()
-                pos_mask = ~negs
-                if np.any(pos_mask) and pos_mask.sum() > 0:
-                    pos = group[pos_mask]
-                    pos_sum = pos.sum()
-                    if pos_sum > 0:
-                        group[pos_mask] += (neg_sum / pos_sum) * pos
-                group[negs] = 0
-                y_high[start:end] = group
-        # Re-enforce constraint (nan/inf safe)
-        current = C @ y_high
-        factor = np.ones_like(y_low, dtype=float)
-        mask = np.abs(current) > 1e-12
-        safe = mask & np.isfinite(current) & np.isfinite(y_low)
-        factor[safe] = y_low[safe] / current[safe]
-        y_high = y_high * np.repeat(factor, m)
+        if lengths is not None:
+            lengths = np.asarray(lengths, dtype=int)
+            pos = 0
+            for i in range(n_low):
+                m = int(lengths[i])
+                start = pos
+                end = pos + m
+                pos += m
+                if y_low[i] < 0:
+                    continue
+                group = y_high[start:end]
+                negs = group < 0
+                if np.any(negs):
+                    neg_sum = group[negs].sum()
+                    pos_mask = ~negs
+                    if np.any(pos_mask) and pos_mask.sum() > 0:
+                        p = group[pos_mask]
+                        ps = p.sum()
+                        if ps > 0:
+                            group[pos_mask] += (neg_sum / ps) * p
+                    group[negs] = 0
+                    y_high[start:end] = group
+            # re-enforce with variable repeat
+            current = C @ y_high
+            factor = np.ones_like(y_low, dtype=float)
+            mask = np.abs(current) > 1e-12
+            safe = mask & np.isfinite(current) & np.isfinite(y_low)
+            factor[safe] = y_low[safe] / current[safe]
+            y_high = y_high * np.repeat(factor, lengths)
+        else:
+            m = len(y_high) // n_low if n_low else 1
+            for i in range(n_low):
+                start = i * m
+                end = start + m
+                if y_low[i] < 0:
+                    # Negative aggregate target: allow negative high-freq values
+                    continue
+                group = y_high[start:end]
+                negs = group < 0
+                if np.any(negs):
+                    neg_sum = group[negs].sum()
+                    pos_mask = ~negs
+                    if np.any(pos_mask) and pos_mask.sum() > 0:
+                        pos = group[pos_mask]
+                        pos_sum = pos.sum()
+                        if pos_sum > 0:
+                            group[pos_mask] += (neg_sum / pos_sum) * pos
+                    group[negs] = 0
+                    y_high[start:end] = group
+            # Re-enforce constraint (nan/inf safe)
+            current = C @ y_high
+            factor = np.ones_like(y_low, dtype=float)
+            mask = np.abs(current) > 1e-12
+            safe = mask & np.isfinite(current) & np.isfinite(y_low)
+            factor[safe] = y_low[safe] / current[safe]
+            y_high = y_high * np.repeat(factor, m)
     return y_high
 
 
@@ -456,14 +488,12 @@ class TemporalAligner:
         return ratio
 
     def _compute_high_lengths(self, low_dates: Any, target_freq: str | None = None) -> list[int]:
-        """Calendar-aware per-low-period high-freq counts (variable lengths).
+        """General calendar-aware per-low-period child counts for ANY (low_freq, target_freq) pair.
 
-        For monthly low dates + target_freq daily, returns the real number of days in each
-        month (28-31) based on the date's year/month. This prevents fixed-ratio force-fitting.
-        Falls back to repeated scalar ratio for regular/unsupported cases.
+        For each source period, determine its true calendar end (using period semantics or observed),
+        then count how many target-freq dates are in [low_start, period_end].
+        This gives variable correct children counts (e.g. 90/91/92 for Q->D, 365/366 for Y->D, exactly 7 for W->D).
         """
-        tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
-        wants_daily = "d" in tf or "day" in tf
         if low_dates is None:
             return []
         try:
@@ -476,36 +506,88 @@ class TemporalAligner:
             n = len(dlist)
             if n == 0:
                 return []
-            if wants_daily and pd is not None:
+            if pd is None:
+                r = self._infer_ratio(low_dates, target_freq)
+                return [int(r)] * n
+            low_ts = pd.to_datetime(dlist, errors="coerce").dropna()
+            n = len(low_ts)
+            if n == 0:
+                return []
+            tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
+            # map target to pandas freq code
+            if any(x in tf for x in ("d", "day")):
+                pd_freq = "D"
+            elif "w" in tf:
+                pd_freq = "W"
+            elif any(x in tf for x in ("mo", "month", "m")) and "q" not in tf:
+                pd_freq = "MS"
+            elif "q" in tf:
+                pd_freq = "QS"
+            elif any(x in tf for x in ("y", "year", "a")):
+                pd_freq = "YS"
+            else:
+                pd_freq = "D"
+            # determine low period freq for end calc (normalize anchored freqs)
+            low_f = None
+            if n >= 3:
                 try:
-                    dpd = pd.to_datetime(dlist, errors="coerce")
-                    # detect if the low periods are month-granularity
-                    low_f = None
-                    if len(dpd.dropna()) >= 2:
-                        try:
-                            low_f = pd.infer_freq(dpd.dropna())
-                        except Exception:
-                            low_f = None
-                    if low_f is None:
-                        try:
-                            delta = (dpd.dropna().iloc[1] - dpd.dropna().iloc[0]).days
-                            if 20 < delta <= 40:
-                                low_f = "M"
-                        except Exception:
-                            pass
-                    if low_f and "M" in str(low_f).upper():
-                        lens = []
-                        for ts in dpd:
-                            if pd.isna(ts):
-                                lens.append(30)
-                            else:
-                                lens.append(calendar.monthrange(ts.year, ts.month)[1])
-                        return lens
+                    low_f = pd.infer_freq(low_ts)
                 except Exception:
-                    pass
-            # regular or unsupported: fixed ratio repeated (may raise later for some irregular)
-            r = self._infer_ratio(low_dates, target_freq)
-            return [int(r)] * n
+                    low_f = None
+            if low_f is None and n >= 2:
+                delta = (low_ts[1] - low_ts[0]).days
+                if delta >= 300:
+                    low_f = "Y"
+                elif delta >= 80:
+                    low_f = "Q"
+                elif delta >= 20:
+                    low_f = "M"
+                elif delta >= 5:
+                    low_f = "W"
+                else:
+                    low_f = "D"
+            # normalize for to_period
+            if low_f:
+                lf = low_f.split("-")[0].upper()
+                if lf.startswith("Q"):
+                    low_f = "Q"
+                elif lf.startswith("A") or lf.startswith("Y"):
+                    low_f = "Y"
+                elif lf.startswith("M"):
+                    low_f = "M"
+                elif lf.startswith("W"):
+                    low_f = "W"
+                elif lf.startswith("D"):
+                    low_f = "D"
+                else:
+                    low_f = lf[0] if lf else None
+            lengths = []
+            for i in range(n):
+                start = low_ts[i]
+                # compute calendar end of THIS low period
+                try:
+                    p = start.to_period(low_f) if low_f else start.to_period("M")
+                    end = p.end_time
+                except Exception:
+                    # fallback: use observed delta or +1M
+                    if i < n-1:
+                        end = low_ts[i+1] - pd.Timedelta(1, "D")
+                    elif n >= 2:
+                        delta = low_ts[i] - low_ts[i-1]
+                        end = start + delta - pd.Timedelta(1, "D")
+                    else:
+                        end = start + pd.DateOffset(months=1) - pd.Timedelta(1, "D")
+                try:
+                    highs = pd.date_range(start=start, end=end, freq=pd_freq)
+                    clen = len(highs)
+                    if clen == 0:
+                        r = self._infer_ratio(low_dates, target_freq)
+                        clen = int(r)
+                    lengths.append(clen)
+                except Exception:
+                    r = self._infer_ratio(low_dates, target_freq)
+                    lengths.append(int(r))
+            return lengths
         except Exception:
             r = self._default_ratio(target_freq)
             return [int(r)] * (len(dlist) if "dlist" in locals() else 0)
@@ -921,7 +1003,8 @@ class TemporalAligner:
 
             # Negative correction
             if self.correct_negatives:
-                y_h = _correct_negatives(y_h, self._C, y_low)
+                lens = getattr(self, "_high_lengths", None)
+                y_h = _correct_negatives(y_h, self._C, y_low, lens)
 
             # Capture original sizes before possible drop so we can keep n_low/n_high consistent
             orig_n_high = getattr(self, "_n_high", len(y_h))
@@ -1214,24 +1297,29 @@ class TemporalAligner:
         if n_low == 0:
             return pl.Series([], dtype=pl.Date)
 
-        # Use calendar-aware lengths for irregular (M->D etc) so total n_high and dates reach true end
+        # Use calendar-aware lengths for irregular so total n_high and dates reach true end
         lengths = self._compute_high_lengths(low, target_freq)
         n_high = int(np.sum(lengths)) if lengths else n_low * self._infer_ratio(low, target_freq)
         tf = (target_freq or self.target_freq or "1mo").lower()
-        high_interval = "1mo"
-        if "d" in tf or "day" in tf:
-            high_interval = "1d"
+        # proper target freq for date generation (no longer force "1mo" for q/y)
+        if any(x in tf for x in ("d", "day")):
+            pd_freq = "D"
         elif "w" in tf:
-            high_interval = "1w"
-        elif "q" in tf or "y" in tf:
-            high_interval = "1mo"
+            pd_freq = "W"
+        elif any(x in tf for x in ("mo", "month")) and "q" not in tf:
+            pd_freq = "MS"
+        elif "q" in tf:
+            pd_freq = "QS"
+        elif any(x in tf for x in ("y", "year", "a")):
+            pd_freq = "YS"
+        else:
+            pd_freq = "D"
 
-        # Preferred: pandas (if present) for calendar-correct month steps etc.
+        # Preferred: pandas (if present) for calendar-correct steps
         if pd is not None:
             try:
                 start = low[0]
                 start_pd = pd.Timestamp(start) if not isinstance(start, pd.Timestamp) else start
-                pd_freq = {"1mo": "MS", "1d": "D", "1w": "W"}.get(high_interval, "MS")
                 high_pd = pd.date_range(start=start_pd, periods=n_high, freq=pd_freq)
                 s = pl.from_pandas(pd.Series(high_pd).to_frame("_d"))["_d"].cast(pl.Date)
                 if len(s) == n_high:
@@ -1239,7 +1327,7 @@ class TemporalAligner:
             except Exception:
                 pass  # fall through to pure python
 
-        # Pure-python fallback (no pandas, always expands to correct high-freq, never repeats low dates)
+        # Pure-python fallback (simple daily/weekly/month stepping; for full generality pd is recommended)
         import calendar as _cal
         from datetime import date as _date
         from datetime import timedelta as _td
@@ -1251,20 +1339,41 @@ class TemporalAligner:
             except Exception:
                 cur = _date(1970, 1, 1)
         dates_py.append(cur)
+        # determine step kind from tf
+        step_kind = "d"
+        if "w" in tf:
+            step_kind = "w"
+        elif any(x in tf for x in ("mo", "month")):
+            step_kind = "mo"
+        elif "q" in tf:
+            step_kind = "q"
+        elif any(x in tf for x in ("y", "year")):
+            step_kind = "y"
         for _ in range(1, n_high):
-            if high_interval == "1mo":
+            if step_kind == "mo":
                 y, m, d = cur.year, cur.month, cur.day
                 m2 = m + 1
                 y2 = y + (m2 - 1) // 12
                 m2 = ((m2 - 1) % 12) + 1
                 d2 = min(d, _cal.monthrange(y2, m2)[1])
                 cur = _date(y2, m2, d2)
-            elif high_interval == "1d":
-                cur = cur + _td(days=1)
-            elif high_interval == "1w":
+            elif step_kind == "q":
+                # quarter step: +3 months
+                y, m, d = cur.year, cur.month, cur.day
+                m2 = m + 3
+                y2 = y + (m2 - 1) // 12
+                m2 = ((m2 - 1) % 12) + 1
+                d2 = min(d, _cal.monthrange(y2, m2)[1])
+                cur = _date(y2, m2, d2)
+            elif step_kind == "y":
+                y, m, d = cur.year, cur.month, cur.day
+                y2 = y + 1
+                d2 = min(d, _cal.monthrange(y2, m)[1])
+                cur = _date(y2, m, d2)
+            elif step_kind == "w":
                 cur = cur + _td(weeks=1)
             else:
-                cur = cur + _td(days=28)
+                cur = cur + _td(days=1)
             dates_py.append(cur)
         return pl.Series(dates_py, dtype=pl.Date)
 

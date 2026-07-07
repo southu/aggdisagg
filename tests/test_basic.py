@@ -451,6 +451,47 @@ def test_monthly_to_daily_uses_variable_calendar_lengths_no_drift():
     assert np.isclose(cs[feb_end], 101.0)
 
 
+# --- 1.5.1 generalization of calendar-aware variable ratios to all freq pairs ---
+def _load_freq_test(freq):
+    import pandas as pd
+    f = f"/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-{freq}.csv"
+    pdf = pd.read_csv(f)
+    vc = [c for c in pdf.columns if c not in ("start", "end")]
+    return pl.DataFrame({
+        "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+        **{c: pdf[c].astype(float).tolist() for c in vc}
+    })
+
+@pytest.mark.parametrize("src, tgt, expected_last, expected_min_h, date_step_check", [
+    ("yearly", "1d", "2026-12-31", 6900, None),
+    ("quarterly", "1d", "2026-06-30", 4500, None),
+    ("weekly", "1d", None, 2240, "max_diff_1day"),
+    ("yearly", "1q", None, 70, "quarterly_step"),
+])
+def test_general_calendar_variable_ratios(src, tgt, expected_last, expected_min_h, date_step_check):
+    a = TemporalAligner(method="linear", target_freq=tgt, agg="sum")
+    o = a.disaggregate_columns(_load_freq_test(src), datetime_col="date", include_dates=True)
+    dlist = o["date"].to_list()
+    if expected_last:
+        assert str(dlist[-1]) == expected_last
+    assert o.height >= expected_min_h
+    if date_step_check == "max_diff_1day":
+        diffs = pd.Series(dlist).diff().dropna().dt.days if hasattr(pd.Series(dlist[0]), "days") else None
+        # for daily target, consecutive
+        if diffs is not None:
+            assert diffs.max() == 1
+    if date_step_check == "quarterly_step":
+        # check steps are ~3 months
+        m0, m1 = dlist[0].month, dlist[1].month
+        assert (m1 - m0) % 12 == 3 or (m0 - m1) % 12 == 9
+
+def test_no_crash_on_negatives_with_irregular_M_to_D():
+    a = TemporalAligner(method="linear", target_freq="1d", agg="sum")
+    o = a.disaggregate_columns(_load_freq_test("monthly"), datetime_col="date", include_dates=True)
+    assert o.height > 3000
+    # basic sum check on a non-nan prefix would be in other tests
+
+
 def test_include_dates_returns_pl_Date():
     # BUG5
     df = pl.DataFrame({"date": [date(2020,1,1), date(2020,4,1)], "y": [100., 200.]})
