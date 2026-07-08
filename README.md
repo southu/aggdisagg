@@ -149,17 +149,23 @@ back = aligner.aggregate(high, freq="1y")   # should match original low almost e
 ```
 
 **Output shape**
-The returned DataFrame contains `y_disaggregated` (and `_std` / `_lower` / `_upper` bands only when `with_uncertainty=True` was passed to `disaggregate_columns`). Original context columns are **not** automatically repeated. You can expand dates yourself:
+By default (`return_dataframe=True, include_dates=True`), `fit_transform` returns a ready-to-use Polars DataFrame with a leading `date` (pl.Date) column plus `y_disaggregated` (and bands when `with_uncertainty=True`). This matches the behavior of `disaggregate_columns(..., include_dates=True)`.
 
 ```python
-# Example: attach proper high-freq dates (fit_transform itself returns only values)
+high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")  # has "date" + "y_disaggregated"
+```
+
+To get the prior values-only DataFrame (no date column), use `return_dataframe=False`. The manual date expansion is still available as an advanced/optional path:
+
+```python
+# Advanced: manual date attachment (or for custom week_start etc.)
 low_dates = low_df["date"]
-high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
+high = aligner.fit_transform(low_df, datetime_col="date", target_col="y", return_dataframe=False)
 high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date"))
 ```
 
-**Limitations (as of 1.1.0)**
-- Date expansion in the output is basic (low-freq dates are not auto-expanded).
+**Limitations (as of 1.10.0)**
+- Date expansion uses the same calendar-aware logic as `expand_high_freq_dates` (now attached by default on `fit_transform`).
 - Uncertainty is a simple bootstrap and can be noisy or near-zero.
 - All listed methods are fully implemented, produce distinct results, respond to indicators/ρ where applicable, and satisfy the aggregation constraint. (Denton uses quadratic penalty on first/second differences; Chow-Lin family uses GLS with AR(1) or IAR(1) errors.)
 - Only regular frequency ratios are supported.
@@ -181,6 +187,33 @@ xa = aligner.to_xarray(high_df)
 ```
 
 See `examples/quickstart.py` for complete gallery.
+
+## Benchmarks
+
+`aggdisagg` is Polars-native (since 1.6.1 the aggregate path no longer routed through pandas). The recommended API for many series is `disaggregate_columns` (internally loops over columns but uses the fast Polars/NumPy core per series + shared setup).
+
+`benchmarks/bench_disagg.py` runs a deterministic, closed-form benchmark of the multi-series path vs an equivalent naive per-series loop. It reports wall time (best of k) on your machine.
+
+Example run (this hardware):
+
+```
+aggdisagg 1.10 multi-series benchmark (disaggregate_columns vectorized vs per-series naive)
+Python 3.12.13, polars 1.42.1
+Platform: macOS-26.3.1-arm64-arm-64bit
+
+| N | n_low | method | vec_ms | naive_ms | speedup | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 20 | 12 | uniform | 6.4 | 5.4 | 0.9x |  |
+| 20 | 12 | linear | 6.4 | 5.7 | 0.9x |  |
+| 20 | 12 | denton | 17.6 | 15.8 | 0.9x | quad |
+| 20 | 12 | chow-lin-opt | 318.4 | 303.8 | 1.0x | rho opt |
+| 100 | 12 | uniform | 28.8 | 27.2 | 0.9x |  |
+| 100 | 12 | linear | 29.8 | 29.0 | 1.0x |  |
+| 100 | 12 | denton | 78.6 | 76.7 | 1.0x | quad |
+| 100 | 12 | chow-lin-opt | 1530.2 | 1508.1 | 1.0x | rho opt |
+```
+
+Re-run `python benchmarks/bench_disagg.py` to refresh on your hardware. Ratios are honest (overhead of the convenience wrapper is small; chow-lin-opt is slower by design because of ρ search; denton due to the quadratic penalty solve).
 
 ## Development & Publishing
 

@@ -5,6 +5,18 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-07-08
+
+### Added
+- `fit_transform(..., return_dataframe=True, include_dates=True)` (new defaults) returns a ready-to-use DataFrame with `date` (pl.Date) prepended. Matches `disaggregate_columns(include_dates=True)` ergonomics for the single-series lower-level API. `return_dataframe=False` is the exact prior values-only escape hatch (no behavior or numeric change).
+- Updated README First-User Tips / Output shape section and `expand_high_freq_dates` docstring.
+- `benchmarks/bench_disagg.py`: reproducible, deterministic multi-series benchmark (vectorized `disaggregate_columns` vs naive per-series loop). Includes uniform/linear/denton/chow-lin-opt. Prints embeddable table. Honest ratios; slower methods shown on purpose.
+- Added regression test for the new `fit_transform` output options.
+
+### Changed
+- No numeric changes (points, bands, all methods, roundtrips, etc. identical).
+- "Polars-native" claim now backed by auditable benchmark numbers (see README).
+
 ## [1.9.2] - 2026-07-08
 
 ### Fixed

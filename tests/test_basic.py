@@ -175,6 +175,36 @@ def test_gls_analytical_uncertainty_coverage_regression():
     assert np.nanmax(sd_uni) > 0, "uniform std must be positive"
 
 
+def test_fit_transform_return_dataframe_and_include_dates():
+    """1.10 ergonomics: fit_transform now attaches date by default (parity with disagg_columns)."""
+    import pandas as pd
+    try:
+        pdf = pd.read_csv("/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-quarterly.csv")
+    except Exception:
+        pytest.skip("test data not available")
+    d = pl.DataFrame({
+        "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+        "y": pdf["flow_sales"].astype(float).tolist()
+    })
+    out = TemporalAligner(method="linear", target_freq="1mo").fit_transform(
+        d, datetime_col="date", target_col="y"
+    )
+    assert "date" in out.columns and out.schema["date"] == pl.Date
+    assert out.height == d.height * 3
+    raw = TemporalAligner(method="linear", target_freq="1mo").fit_transform(
+        d, datetime_col="date", target_col="y", return_dataframe=False
+    )
+    assert "date" not in raw.columns
+    assert np.allclose(
+        out["y_disaggregated"].to_numpy(), raw["y_disaggregated"].to_numpy(), equal_nan=True
+    )
+    # with uncertainty
+    outu = TemporalAligner(method="linear", target_freq="1mo").fit_transform(
+        d, datetime_col="date", target_col="y", with_uncertainty=True
+    )
+    assert "date" in outu.columns and "y_std" in outu.columns
+
+
 def test_first_last_mean_agg():
     df = pl.DataFrame({"date": [date(2020,1,1), date(2021,1,1)], "y": [100.0, 120.0]})
     for agg in ["first", "last", "mean"]:

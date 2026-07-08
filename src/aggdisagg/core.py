@@ -1037,6 +1037,8 @@ class TemporalAligner:
         extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
         with_uncertainty: bool = False,
         confidence_level: float = 0.90,
+        return_dataframe: bool = True,
+        include_dates: bool = True,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Fit and return the disaggregated high-frequency series.
 
@@ -1055,12 +1057,22 @@ class TemporalAligner:
             - "hold": fill with last valid observed value (for NaN-input blocks or end)
             - "linear": linear extend from last slope
             - "drop": truncate output to drop periods originating from NaN low-freq inputs (shortens)
+        return_dataframe : bool, default True
+            If True, return a Polars DataFrame. If False, return exactly the prior
+            (pre-1.10) behavior: DataFrame containing only the value column(s)
+            (y_disaggregated +/- bands), without dates. Back-compat escape hatch.
+        include_dates : bool, default True
+            When return_dataframe=True, prepend a pl.Date column named "date" containing
+            the expanded high-frequency dates (same as disaggregate_columns(..., include_dates=True)).
+            Dates are generated via expand_high_freq_dates using the aligner's week_start etc.
+            Ignored when return_dataframe=False.
 
         Returns
         -------
         pl.DataFrame (or LazyFrame)
-            Column "y_disaggregated" (optionally + "y_std"), length usually n_low * ratio
-            (may be shorter if extrapolate="drop").
+            By default (return_dataframe=True): a DataFrame with "date" (if include_dates)
+            prepended and "y_disaggregated" (optionally + y_std/lower/upper when with_uncertainty).
+            When return_dataframe=False: exactly the prior behavior (DataFrame with value columns only, no date).
         """
         # Support lazy: collect for heavy ops
         is_lazy = isinstance(df, pl.LazyFrame)
@@ -1082,6 +1094,24 @@ class TemporalAligner:
                     df = pl.from_pandas(pd.DataFrame({"t": range(len(df)), "y": np.asarray(df)}))
             datetime_col = df.columns[0]  # assume first is time
 
+        # Capture low-frequency dates (supports polars/pandas inputs) for optional attachment.
+        # Done before fit() which normalizes further for pandas paths.
+        low_dates = None
+        try:
+            if hasattr(df, "columns") and datetime_col in df.columns:
+                col = df[datetime_col]
+                if isinstance(col, pl.Series):
+                    low_dates = col.clone()
+                elif pd is not None and isinstance(df, pd.DataFrame):
+                    low_dates = pl.from_pandas(pd.Series(col).reset_index(drop=True))
+                else:
+                    low_dates = pl.Series(list(col))
+            elif (pd is not None and isinstance(df, pd.DataFrame) and df.index.name == datetime_col) or (hasattr(df, "index") and isinstance(df.index, pd.DatetimeIndex)):
+                # pandas with dt index as date
+                low_dates = pl.from_pandas(df.index.to_series().reset_index(drop=True))
+        except Exception:
+            low_dates = None
+
         # allow per-call override without mutating instance permanently
         orig_extrap = self.extrapolate
         if extrapolate is not None:
@@ -1097,6 +1127,14 @@ class TemporalAligner:
                 # early return clean empty for zero-length input
                 self._high_lengths = np.array([], dtype=int)
                 high_df = pl.DataFrame({"y_disaggregated": np.array([], dtype=float)})
+                if return_dataframe and include_dates and low_dates is not None:
+                    try:
+                        high_dates = self.expand_high_freq_dates(low_dates)
+                        if len(high_dates) > 0:
+                            high_df = high_df.with_columns(high_dates.alias("date"))
+                            high_df = high_df.select(["date", "y_disaggregated"])
+                    except Exception:
+                        pass
                 if is_lazy:
                     high_df = high_df.lazy()
                 return high_df
@@ -1353,7 +1391,7 @@ class TemporalAligner:
                         self._lower[nan_mask] = np.nan
                         self._upper[nan_mask] = np.nan
 
-            # Build output DataFrame.
+            # Build output DataFrame (value columns).
             high_df = pl.DataFrame({"y_disaggregated": y_h})
             if with_uncertainty and self._std_errors is not None:
                 with contextlib.suppress(Exception):
@@ -1362,6 +1400,20 @@ class TemporalAligner:
                         pl.Series(name="y_lower", values=self._lower),
                         pl.Series(name="y_upper", values=self._upper),
                     )
+
+            # Attach dates if requested (new in 1.10 for ergonomics; additive, does not change numerics).
+            if return_dataframe and include_dates and low_dates is not None and getattr(self, "_n_low", 0) > 0:
+                try:
+                    high_dates = self.expand_high_freq_dates(low_dates)
+                    n = high_df.height
+                    if len(high_dates) > n:
+                        high_dates = high_dates.slice(0, n)
+                    high_df = high_df.with_columns(high_dates.alias("date"))
+                    # date first, then value columns (parity with disaggregate_columns(include_dates=True))
+                    val_cols = [c for c in high_df.columns if c != "date"]
+                    high_df = high_df.select(["date", *val_cols])
+                except Exception:
+                    pass  # fall back to values-only DF
 
             if is_lazy:
                 high_df = high_df.lazy()
@@ -1498,6 +1550,10 @@ class TemporalAligner:
             ft_kwargs["extrapolate"] = extrapolate
         ft_kwargs["with_uncertainty"] = with_uncertainty
         ft_kwargs["confidence_level"] = confidence_level
+        # Force values-only from fit_transform (no date attach inside); disaggregate_columns
+        # handles its own include_dates + column renaming for multi-target output.
+        ft_kwargs["return_dataframe"] = False
+        ft_kwargs["include_dates"] = False
         _ = self.fit_transform(
             first_sub, datetime_col=datetime_col, target_col=first_col, **ft_kwargs
         )
@@ -1875,13 +1931,14 @@ class TemporalAligner:
         low-frequency period using the inferred ratio. Always returns pl.Date dtype
         with distinct timestamps (no stamping of low dates).
 
-        Note: :meth:`fit_transform` returns *only* the value column(s) (no date column).
-        Use ``include_dates=True`` in :meth:`disaggregate_columns`, or expand from the
-        original low-freq dates manually:
+        Note: Since 1.10.0, :meth:`fit_transform` attaches a "date" column by default
+        (return_dataframe=True, include_dates=True). For the prior values-only behavior
+        use return_dataframe=False. You can still use this method manually for custom
+        control, or rely on ``include_dates=True`` in :meth:`disaggregate_columns`:
 
             low_dates = low_df["date"]
             high = aligner.fit_transform(low_df, datetime_col="date", target_col="y")
-            high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date"))
+            high = high.with_columns(aligner.expand_high_freq_dates(low_dates).alias("date"))  # advanced path
 
         Args:
             low_dates: Series or list of low-frequency dates (e.g. quarterly starts).
