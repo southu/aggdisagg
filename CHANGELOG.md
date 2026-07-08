@@ -5,6 +5,12 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.2] - 2026-07-08
+
+### Fixed
+- `benchmarks/bench_disagg.py`: tempdisagg detection was broken (no actual import in the try, so HAS_TD was always True and the "not installed" message never printed). Fixed the guard to `try: import tempdisagg; HAS_TD = True ...`.
+- Made benchmark labels consistent with honest framing: dropped "vectorized" from the script title, renamed the "speedup" table column to "ratio", and updated the example table + surrounding text in README.
+
 ## [1.10.1] - 2026-07-08
 
 ### Fixed

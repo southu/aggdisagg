@@ -204,23 +204,23 @@ Because `disaggregate_columns` internally loops over columns (calling the same c
 Example run (this hardware):
 
 ```
-aggdisagg 1.10 multi-series benchmark (disaggregate_columns vectorized vs per-series naive)
+aggdisagg 1.10 multi-series benchmark (disaggregate_columns vs per-series naive)
 Python 3.12.13, polars 1.42.1
 Platform: macOS-26.3.1-arm64-arm-64bit
 
-| N | n_low | method | vec_ms | naive_ms | speedup | note |
+| N | n_low | method | vec_ms | naive_ms | ratio | note |
 | --- | --- | --- | --- | --- | --- | --- |
-| 20 | 12 | uniform | 6.4 | 5.4 | 0.9x |  |
-| 20 | 12 | linear | 6.4 | 5.7 | 0.9x |  |
-| 20 | 12 | denton | 17.6 | 15.8 | 0.9x | quad |
-| 20 | 12 | chow-lin-opt | 318.4 | 303.8 | 1.0x | rho opt |
-| 100 | 12 | uniform | 28.8 | 27.2 | 0.9x |  |
-| 100 | 12 | linear | 29.8 | 29.0 | 1.0x |  |
-| 100 | 12 | denton | 78.6 | 76.7 | 1.0x | quad |
-| 100 | 12 | chow-lin-opt | 1530.2 | 1508.1 | 1.0x | rho opt |
+| 20 | 12 | uniform | 6.3 | 5.5 | 0.9x |  |
+| 20 | 12 | linear | 6.2 | 5.8 | 0.9x |  |
+| 20 | 12 | denton | 16.5 | 15.3 | 0.9x | quad |
+| 20 | 12 | chow-lin-opt | 317.3 | 301.3 | 0.9x | rho opt |
+| 100 | 12 | uniform | 28.9 | 27.7 | 1.0x |  |
+| 100 | 12 | linear | 30.1 | 29.0 | 1.0x |  |
+| 100 | 12 | denton | 79.0 | 76.7 | 1.0x | quad |
+| 100 | 12 | chow-lin-opt | 1526.6 | 1510.8 | 1.0x | rho opt |
 ```
 
-Re-run `python benchmarks/bench_disagg.py` to refresh on your hardware. The numbers show the expected ~1.0× (no multi-series vectorization magic across columns; the convenience layer adds negligible cost). Note that `chow-lin-opt` is slower by design (ρ optimization) and `denton` due to the quadratic solve.
+Re-run `python benchmarks/bench_disagg.py` to refresh on your hardware. The numbers show the expected ~1.0× (the convenience wrapper internally loops per column, so ratios near 1.0× are expected; the layer adds negligible overhead). Note that `chow-lin-opt` is slower by design (ρ optimization) and `denton` due to the quadratic solve.
 
 ## Development & Publishing
 

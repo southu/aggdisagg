@@ -1,4 +1,4 @@
-"""Reproducible multi-series benchmark for aggdisagg (vectorized vs naive).
+"""Reproducible multi-series benchmark for aggdisagg (vs per-series naive loop).
 
 Run: python benchmarks/bench_disagg.py
 
@@ -60,12 +60,12 @@ def bench_naive(df: pl.DataFrame, method: str, k: int = 2) -> float:
 
 
 def main():
-    print("aggdisagg 1.10 multi-series benchmark (disaggregate_columns vectorized vs per-series naive)")
+    print("aggdisagg 1.10 multi-series benchmark (disaggregate_columns vs per-series naive)")
     print(f"Python {sys.version.split()[0]}, polars {pl.__version__}")
     print(f"Platform: {platform.platform()}")
     print()
 
-    headers = ["N", "n_low", "method", "vec_ms", "naive_ms", "speedup", "note"]
+    headers = ["N", "n_low", "method", "vec_ms", "naive_ms", "ratio", "note"]
     print("| " + " | ".join(headers) + " |")
     print("| " + " | ".join(["---"]*len(headers)) + " |")
 
