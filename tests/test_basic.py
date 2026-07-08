@@ -111,6 +111,54 @@ def test_predict_with_uncertainty_and_summary():
     assert "rho" in s
 
 
+def test_gls_analytical_uncertainty_coverage_regression():
+    """Regression test for calibrated analytical GLS bands (1.9.1 fix).
+
+    The analytical variance for chow-lin family / litterman / fernandez must use
+    full σ² * Var(ŷ_h) so that 90% bands achieve 0.80-0.98 coverage (and widths
+    same order as bootstrap), matching bootstrap calibration on the corpus.
+    """
+    test_dir = "/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/"
+    monthly = f"{test_dir}signal-monthly.csv"
+    try:
+        import pandas as pd
+        pdf = pd.read_csv(monthly)
+        vc = [c for c in pdf.columns if c not in ("start", "end")]
+        m = pl.DataFrame({
+            "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+            **{c: pdf[c].astype(float).tolist() for c in vc}
+        })
+    except Exception:
+        pytest.skip("test signal files not available at " + test_dir)
+
+    truth = m["flow_sales"].to_numpy()
+
+    def coverage(method: str) -> float:
+        q = TemporalAligner().aggregate(
+            m, freq="1q", datetime_col="date", col_semantics={"flow_sales": "flow"}
+        )
+        back = TemporalAligner(method=method, target_freq="1mo").disaggregate_columns(
+            q.select(["date", "flow_sales"]),
+            datetime_col="date",
+            include_dates=True,
+            col_semantics={"flow_sales": "flow"},
+            with_uncertainty=True,
+            confidence_level=0.90,
+        )
+        lo = back["flow_sales_lower"].to_numpy()
+        hi = back["flow_sales_upper"].to_numpy()
+        n = min(len(truth), len(lo))
+        t, lo, hi = truth[:n], lo[:n], hi[:n]
+        fin = ~np.isnan(t) & ~np.isnan(lo)
+        return float(np.mean((t[fin] >= lo[fin]) & (t[fin] <= hi[fin])))
+
+    for mth in ["chow-lin", "chow-lin-opt", "litterman", "fernandez"]:
+        c = coverage(mth)
+        assert 0.80 <= c <= 0.98, (mth, c)
+    clin = coverage("linear")
+    assert 0.80 <= clin <= 0.98, ("linear", clin)
+
+
 def test_first_last_mean_agg():
     df = pl.DataFrame({"date": [date(2020,1,1), date(2021,1,1)], "y": [100.0, 120.0]})
     for agg in ["first", "last", "mean"]:

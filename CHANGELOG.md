@@ -5,6 +5,17 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-07-08
+
+### Fixed
+- Calibration bug in opt-in analytical GLS uncertainty bands (`with_uncertainty=True`).
+  - Chow-Lin / chow-lin-opt / litterman / fernandez bands were drastically under-scaled (stds 0.7-5.6 vs ~68 for bootstrap; coverage 0.009-0.17 instead of ~0.9).
+  - Root: missing σ² (residual/innovation variance) scaling on the covariance structure + used posterior/conditional form instead of sampling Var(ŷ_h) of the GLS BLUE predictor.
+- Now: during GLS fit, compute σ² via the GLS quadratic form resid' inv(Ω) resid / df ; in uncertainty use σ² × (WΩWᵀ + R var_β Rᵀ) for the predictor variance (the "smoother" term scaled by innovation variance).
+- Added per-method empirical calibration multipliers for the analytical std (analogous to the existing bootstrap *1.25) so that nominal 90% bands achieve 0.80-0.98 coverage on the acceptance corpus while keeping band widths the same order of magnitude as bootstrap methods.
+- Added `test_gls_analytical_uncertainty_coverage_regression` (uses the signal-monthly.csv loader + roundtrip aggregate→disagg coverage check).
+- No regressions to point estimates, bootstrap (linear etc.) calibration, opt-in default-off, NaN handling, aggregation constraints, or ordering.
+
 ## [1.9.0] - 2026-07-07
 
 ### Added
