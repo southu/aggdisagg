@@ -16,6 +16,7 @@ import polars as pl
 from aggdisagg import TemporalAligner
 
 try:
+    import tempdisagg  # noqa: F401 - only for presence test
     HAS_TD = True
 except Exception:
     HAS_TD = False
