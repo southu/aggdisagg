@@ -821,3 +821,40 @@ def test_162_ambiguous_trending_flow_emits_warning_and_records_actual():
     assert sem["flow_sales"] in ("flow", "stock")  # decision made, not forced constant
 
 
+def test_181_weekly_source_freq_detection_any_anchor():
+    """1.8.1 fix: W->D must use ratio 7 for any weekly anchor (not just Monday-locked)."""
+    import numpy as np
+    for fname in ["signal-weekly.csv", "signal-weekly-sun.csv"]:
+        f = f"/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/{fname}"
+        pdf = pd.read_csv(f)
+        vc = [c for c in pdf.columns if c not in ("start", "end")]
+        df = pl.DataFrame({
+            "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+            **{c: pdf[c].astype(float).tolist() for c in vc}
+        }).select(["date", "flow_sales"])
+        o = TemporalAligner(method="linear", target_freq="1d").disaggregate_columns(
+            df, datetime_col="date", include_dates=True, col_semantics={"flow_sales": "flow"}
+        )
+        assert o.height == df.height * 7, (fname, o.height)
+        assert o["date"].diff().drop_nulls().dt.total_days().max() == 1
+    # roundtrip W(sun)->D->W exact
+    f = "/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/signal-weekly-sun.csv"
+    pdf = pd.read_csv(f)
+    vc = [c for c in pdf.columns if c not in ("start", "end")]
+    wk = pl.DataFrame({
+        "date": pd.to_datetime(pdf["start"]).dt.date.tolist(),
+        **{c: pdf[c].astype(float).tolist() for c in vc}
+    }).select(["date", "flow_sales"])
+    dd = TemporalAligner(method="linear", target_freq="1d", week_start="sunday").disaggregate_columns(
+        wk, datetime_col="date", include_dates=True, col_semantics={"flow_sales": "flow"}
+    )
+    bk = TemporalAligner(week_start="sunday").aggregate(
+        dd, freq="1w", datetime_col="date", col_semantics={"flow_sales": "flow"}
+    )
+    o = wk["flow_sales"].to_numpy()
+    r = bk["flow_sales"].to_numpy()
+    n = min(len(o), len(r))
+    fin = ~np.isnan(o[:n])
+    assert np.nanmax(np.abs(r[:n][fin] - o[:n][fin])) < 1e-6
+
+

@@ -5,6 +5,16 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-07-07
+
+### Fixed
+- Weekly source frequency detection (for disaggregation, e.g. Week→Day) was still locked to Monday anchor: non-Monday weekly inputs (e.g. Sunday-anchored) caused `_compute_high_lengths` to infer only 1 day per week (via pandas `to_period("W")` + date_range starting at the label) instead of 7, yielding wrong n_high = n_weeks instead of n_weeks*7.
+  - Root: the period-end logic assumed low date labels are always "starts" aligned with default 'W' (Monday), and the early span guard + infer didn't special-case weekly sources.
+  - Fix: in `_compute_high_lengths`, for source low_f starting with "W", explicitly span [label, label+6] days and count target ticks in that (always 7 for daily target). This works for any anchor weekday in the provided labels, and is consistent with treating weekly 'date' as the week-start label (per week_start convention).
+  - `_infer_ratio` already returned 7 for W->D; now lengths also does, so disagg uses correct expansion.
+- Added regression tests covering both Monday and Sunday weekly files for W->D (height*7, consecutive dates), and W->D->W exact roundtrip using week_start="sunday".
+- No regressions to Monday W->D, D->W behaviors, partial_weeks, mass cons, etc.
+
 ## [1.8.0] - 2026-07-07
 
 ### Added

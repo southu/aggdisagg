@@ -652,8 +652,14 @@ class TemporalAligner:
                 start = low_ts[i]
                 # compute calendar end of THIS low period
                 try:
-                    p = start.to_period(low_f) if low_f else start.to_period("M")
-                    end = p.end_time
+                    if low_f and low_f.startswith("W"):
+                        # For weekly source, treat the label date as the week start and span 7 days.
+                        # This makes W->D always expand to 7 days regardless of anchor weekday (Mon, Sun, etc.).
+                        # Avoids pandas to_period("W") which assumes a particular anchor and can yield clen=1.
+                        end = start + pd.Timedelta(days=6)
+                    else:
+                        p = start.to_period(low_f) if low_f else start.to_period("M")
+                        end = p.end_time
                 except Exception:
                     # fallback: use observed delta or +1M
                     if i < n-1:
