@@ -133,10 +133,11 @@ def test_gls_analytical_uncertainty_coverage_regression():
 
     truth = m["flow_sales"].to_numpy()
 
+    q = TemporalAligner().aggregate(
+        m, freq="1q", datetime_col="date", col_semantics={"flow_sales": "flow"}
+    )
+
     def coverage(method: str) -> float:
-        q = TemporalAligner().aggregate(
-            m, freq="1q", datetime_col="date", col_semantics={"flow_sales": "flow"}
-        )
         back = TemporalAligner(method=method, target_freq="1mo").disaggregate_columns(
             q.select(["date", "flow_sales"]),
             datetime_col="date",
@@ -157,6 +158,21 @@ def test_gls_analytical_uncertainty_coverage_regression():
         assert 0.80 <= c <= 0.98, (mth, c)
     clin = coverage("linear")
     assert 0.80 <= clin <= 0.98, ("linear", clin)
+
+    # uniform (was producing zero-width bands pre-1.9.2)
+    c_uni = coverage("uniform")
+    assert 0.80 <= c_uni <= 0.98, ("uniform", c_uni)
+    # also verify non-degenerate
+    back_uni = TemporalAligner(method="uniform", target_freq="1mo").disaggregate_columns(
+        q.select(["date", "flow_sales"]),
+        datetime_col="date",
+        include_dates=True,
+        col_semantics={"flow_sales": "flow"},
+        with_uncertainty=True,
+        confidence_level=0.90,
+    )
+    sd_uni = back_uni["flow_sales_std"].to_numpy()
+    assert np.nanmax(sd_uni) > 0, "uniform std must be positive"
 
 
 def test_first_last_mean_agg():

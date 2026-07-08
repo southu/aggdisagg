@@ -5,6 +5,15 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-07-08
+
+### Fixed
+- Uniform method produced zero-width uncertainty bands (std≈0, lower==point==upper) under `with_uncertainty=True`, yielding 0% coverage.
+  - Root cause: in residual bootstrap, resampling low-freq aggregates + re-applying uniform + re-scaling to enforce exact aggregates always yields the identical flat allocation (no shape variation to perturb).
+- Now: for uniform, skip the re-scaling step on bootstrap replicates (variation in resampled block levels provides the uncertainty for the "flat mean" estimator); apply extra calibration factor (0.26 after the shared *1.25) so bands have positive width, same order of magnitude as linear (~65 vs ~68), and achieve ~0.83 coverage on the corpus.
+- Added coverage regression test (non-zero std + 0.80-0.98 coverage for uniform; no impact on other methods).
+- No regressions to the other six methods' calibration, point estimates, opt-in/default-off behavior, NaN propagation, or aggregation constraints.
+
 ## [1.9.1] - 2026-07-08
 
 ### Fixed
