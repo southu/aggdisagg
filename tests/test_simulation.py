@@ -2167,9 +2167,7 @@ def test_messy_incomplete_data_batch_9():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -2332,9 +2330,7 @@ def test_messy_incomplete_data_batch_10():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -2499,9 +2495,7 @@ def test_messy_incomplete_data_batch_11():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -2655,9 +2649,7 @@ def test_messy_incomplete_data_batch_12():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -2818,9 +2810,7 @@ def test_messy_incomplete_data_batch_13():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -2980,9 +2970,7 @@ def test_messy_incomplete_data_batch_14():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3144,9 +3132,7 @@ def test_messy_incomplete_data_batch_15():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3308,9 +3294,7 @@ def test_messy_incomplete_data_batch_16():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3472,9 +3456,7 @@ def test_messy_incomplete_data_batch_17():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3636,9 +3618,7 @@ def test_messy_incomplete_data_batch_18():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3800,9 +3780,7 @@ def test_messy_incomplete_data_batch_19():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -3964,9 +3942,7 @@ def test_messy_incomplete_data_batch_20():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4128,9 +4104,7 @@ def test_messy_incomplete_data_batch_21():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4292,9 +4266,7 @@ def test_messy_incomplete_data_batch_22():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4456,9 +4428,7 @@ def test_messy_incomplete_data_batch_23():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4620,9 +4590,7 @@ def test_messy_incomplete_data_batch_24():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4784,9 +4752,7 @@ def test_messy_incomplete_data_batch_25():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -4948,9 +4914,7 @@ def test_messy_incomplete_data_batch_26():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5112,9 +5076,7 @@ def test_messy_incomplete_data_batch_27():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5276,9 +5238,7 @@ def test_messy_incomplete_data_batch_28():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5440,9 +5400,7 @@ def test_messy_incomplete_data_batch_29():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5604,9 +5562,7 @@ def test_messy_incomplete_data_batch_30():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5768,9 +5724,7 @@ def test_messy_incomplete_data_batch_31():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -5932,9 +5886,7 @@ def test_messy_incomplete_data_batch_32():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6096,9 +6048,7 @@ def test_messy_incomplete_data_batch_33():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6260,9 +6210,7 @@ def test_messy_incomplete_data_batch_34():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6424,9 +6372,7 @@ def test_messy_incomplete_data_batch_35():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6588,9 +6534,7 @@ def test_messy_incomplete_data_batch_36():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6752,9 +6696,7 @@ def test_messy_incomplete_data_batch_37():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -6919,9 +6861,7 @@ def test_messy_incomplete_data_batch_38():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -7095,9 +7035,7 @@ def test_messy_incomplete_data_batch_39():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()
@@ -7270,9 +7208,7 @@ def test_messy_incomplete_data_batch_40():
 
             itype = case.get("itype", "polars")
             df = base_df
-            if itype == "pandas":
-                df = base_df.to_pandas()
-            elif itype == "pandas_df":
+            if itype == "pandas" or itype == "pandas_df":
                 df = base_df.to_pandas()
             elif itype == "pandas_series":
                 pdf = base_df.to_pandas()

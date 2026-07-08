@@ -149,7 +149,7 @@ back = aligner.aggregate(high, freq="1y")   # should match original low almost e
 ```
 
 **Output shape**
-The returned DataFrame contains `y_disaggregated` (and `y_std` when uncertainty was computed). Original context columns are **not** automatically repeated (this was changed for robustness across Polars/pandas/object dates). You can expand dates yourself:
+The returned DataFrame contains `y_disaggregated` (and `_std` / `_lower` / `_upper` bands only when `with_uncertainty=True` was passed to `disaggregate_columns`). Original context columns are **not** automatically repeated. You can expand dates yourself:
 
 ```python
 # Example: attach proper high-freq dates (fit_transform itself returns only values)
@@ -173,7 +173,7 @@ See the CHANGELOG for the full list of recent robustness and correctness fixes.
 rec = aligner.reconcile_hierarchical([nat_df, reg_df])
 
 # Uncertainty
-mean, std = aligner.predict_with_uncertainty()
+mean, std = aligner.predict_with_uncertainty()  # real std when uncertainty was requested in disagg (otherwise near-zero)
 
 # Lazy + xarray
 lazy_high = aligner.fit_transform(lazy_df)

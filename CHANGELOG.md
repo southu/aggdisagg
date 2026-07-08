@@ -5,6 +5,22 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-07-07
+
+### Added
+- Opt-in uncertainty bands via `disaggregate_columns(..., with_uncertainty=True, confidence_level=0.90)`.
+  - When False (default): no change, no new columns, identical point estimates.
+  - When True: appends {col}_std, {col}_lower, {col}_upper for each target col; point estimate unchanged.
+  - Analytical GLS conditional covariance for chow-lin* / litterman / fernandez.
+  - Scaled residual bootstrap (respecting aggregation constraint) for uniform / linear / denton / denton-cholette.
+  - Bands are allocation uncertainty only (aggregates of point still exact; no leak to totals).
+- `predict_with_uncertainty()` now returns real (non all-NaN) std when computed.
+- Requirements: finite positive std interior; lower <= point <= upper; interior wider; indicators tighten; NaN low => NaN bands; calibrated ~90% coverage.
+
+### Fixed
+- All point estimate behavior and defaults unchanged.
+- Added tests matching acceptance (default off, bands finite/ordered, calibration coverage, indicator tightens).
+
 ## [1.8.1] - 2026-07-07
 
 ### Fixed
