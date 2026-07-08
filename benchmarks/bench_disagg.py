@@ -84,6 +84,8 @@ def main():
 
     if HAS_TD:
         print("\n(tempdisagg present; rerun with manual timing if desired for extra column)")
+    else:
+        print("\n(tempdisagg not installed — skipping that baseline)")
     print("\nRe-run the script to refresh numbers on your hardware. All data deterministic.")
 
 

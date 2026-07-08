@@ -5,6 +5,15 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-07-08
+
+### Fixed
+- Inverted tempdisagg message in `benchmarks/bench_disagg.py`: the guard printed the "present" message when the package was absent. Now correctly says "tempdisagg not installed — skipping that baseline" when absent, and mentions the extra column only when importable.
+- Reframed README "Why aggdisagg?" and "Benchmarks" sections:
+  - Lead with correctness and features (calendar-aware disagg/agg across all pairs incl. irregular, 8 methods, auto stock/flow, week_start/partial_weeks, honest NaN, calibrated uncertainty) instead of implying speed wins.
+  - Benchmark described honestly as "negligible overhead vs. a hand-written per-series loop" (no multi-series speedup is claimed or present, since the wrapper loops internally).
+  - "Polars-native" kept factual (core since 1.6.1; about interop/implementation, not loop-vs-vectorized claims).
+
 ## [1.10.0] - 2026-07-08
 
 ### Added

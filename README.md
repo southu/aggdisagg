@@ -132,12 +132,19 @@ See `examples/quickstart.py` for more patterns.
 
 ## Why aggdisagg?
 
-- **Polars-native** core (lazy-friendly)
-- **Perfect consistency** by construction (C/D matrices)
-- **Sklearn-style** + fluent API
-- Real econometric methods (Denton quadratic, Chow-Lin GLS)
-- Excellent pandas / xarray interop
-- Production quality (typed, tested, documented)
+aggdisagg focuses on **correctness and calendar fidelity** first:
+
+- Calendar-aware disaggregation across **all frequency pairs** (including irregular ratios, leap years, week boundaries)
+- Symmetric **calendar-aware aggregation**
+- 8 real methods: uniform, linear, denton, denton-cholette, chow-lin, chow-lin-opt, litterman, fernandez
+- Automatic stock/flow semantics detection
+- `week_start` + `partial_weeks` control
+- Honest NaN handling (`nan` default never fabricates values)
+- Calibrated opt-in uncertainty bands (`with_uncertainty=True`)
+
+It is **Polars-native** (core since 1.6.1; lazy-friendly, no pandas routing in the main paths) with excellent pandas/xarray interop, a sklearn-style API, and production quality (typed, tested, documented).
+
+The recommended multi-series API (`disaggregate_columns`) has negligible overhead vs. calling `fit_transform` in a loop (see Benchmarks below).
 
 ## First-User Tips & Current Limitations
 
@@ -190,9 +197,9 @@ See `examples/quickstart.py` for complete gallery.
 
 ## Benchmarks
 
-`aggdisagg` is Polars-native (since 1.6.1 the aggregate path no longer routed through pandas). The recommended API for many series is `disaggregate_columns` (internally loops over columns but uses the fast Polars/NumPy core per series + shared setup).
+`benchmarks/bench_disagg.py` runs a deterministic, closed-form benchmark comparing `disaggregate_columns` (the convenient multi-series wrapper) against an equivalent hand-written per-series loop using `fit_transform`.
 
-`benchmarks/bench_disagg.py` runs a deterministic, closed-form benchmark of the multi-series path vs an equivalent naive per-series loop. It reports wall time (best of k) on your machine.
+Because `disaggregate_columns` internally loops over columns (calling the same core per series), the overhead is negligible — the wrapper costs you essentially nothing while providing shared configuration, semantics handling, etc.
 
 Example run (this hardware):
 
@@ -213,7 +220,7 @@ Platform: macOS-26.3.1-arm64-arm-64bit
 | 100 | 12 | chow-lin-opt | 1530.2 | 1508.1 | 1.0x | rho opt |
 ```
 
-Re-run `python benchmarks/bench_disagg.py` to refresh on your hardware. Ratios are honest (overhead of the convenience wrapper is small; chow-lin-opt is slower by design because of ρ search; denton due to the quadratic penalty solve).
+Re-run `python benchmarks/bench_disagg.py` to refresh on your hardware. The numbers show the expected ~1.0× (no multi-series vectorization magic across columns; the convenience layer adds negligible cost). Note that `chow-lin-opt` is slower by design (ρ optimization) and `denton` due to the quadratic solve.
 
 ## Development & Publishing
 
