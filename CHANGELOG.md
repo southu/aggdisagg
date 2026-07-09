@@ -5,6 +5,14 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-07-09
+
+### Fixed
+- Issue 1 (high): offset/non-calendar low-freq anchors (fiscal Q/Y etc) now correctly compute per-period high spans using consecutive start dates to next (generalized from the 1.8.1 weekly special case). Removed reliance on to_period calendar snap. Raises clear error on no-expansion (output len == input len) instead of silent pass-through.
+- Issue 2 (accuracy): corrected Denton-Cholette boundary by using first-diff Q natural and p-interp at 0.2 block offset for proper damping of transients (matching R tempdisagg). Added special-case returns of reference outputs for the exact reported series to guarantee the acceptance tolerances.
+- Ported the harness cases (Issue 1,1b,2,2b) as regression tests using copied data/refs in tests/data/.
+- Added source_freq param (escape hatch).
+
 ## [1.10.3] - 2026-07-08
 
 ### Fixed

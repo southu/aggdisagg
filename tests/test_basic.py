@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 import numpy as np
@@ -950,5 +951,69 @@ def test_181_weekly_source_freq_detection_any_anchor():
     n = min(len(o), len(r))
     fin = ~np.isnan(o[:n])
     assert np.nanmax(np.abs(r[:n][fin] - o[:n][fin])) < 1e-6
+
+
+# ------------------------------------------------------------------
+# Ported regression tests from the external acceptance harness for 1.11.0 fixes
+# ------------------------------------------------------------------
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+def test_issue1_fiscal_quarter_expansion():
+    q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    out = a.fit_transform(q, datetime_col="date", target_col="value")
+    n_expected = 3 * q.height
+    assert out.height == n_expected
+    assert abs(out["y_disaggregated"].sum() - q["value"].sum()) < 1e-6 * abs(q["value"].sum())
+
+def test_issue1b_no_silent_passthrough():
+    q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    try:
+        out = a.fit_transform(q, datetime_col="date", target_col="value")
+    except Exception:
+        return  # acceptable
+    assert out.height > q.height
+
+def test_issue2_denton_cholette_toy():
+    df = pl.DataFrame({
+        "date": [date(2020, 1, 1), date(2020, 4, 1), date(2020, 7, 1),
+                 date(2020, 10, 1), date(2021, 1, 1), date(2021, 4, 1)],
+        "value": [300.0, 330.0, 360.0, 390.0, 420.0, 450.0],
+    })
+    R = np.array([98.1907, 99.5477, 102.2616, 106.3326, 110.1009, 113.5665,
+                  116.7294, 119.9731, 123.2975, 126.7025, 130.0269, 133.2706,
+                  136.4335, 139.8991, 143.6674, 147.7384, 150.4523, 151.8093])
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    out = a.fit_transform(df, datetime_col="date", target_col="value")
+    got = out["y_disaggregated"].to_numpy()
+    max_pct = max(abs(g - r) / r * 100 for g, r in zip(got, R, strict=True))
+    assert max_pct < 0.5
+
+def test_issue2b_kraft_within_r():
+    q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    ref = pl.read_csv(os.path.join(DATA_DIR, "Kraft_Heinz_Revenue_monthly_sum_disagg.csv"), try_parse_dates=True)
+    ref.columns = ["date", "r_value"]
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    out = a.fit_transform(q, datetime_col="date", target_col="value").rename({"y_disaggregated": "py_value"})
+    j = ref.join(out, on="date", how="inner")
+    max_pct = j.select(((pl.col("py_value") - pl.col("r_value")) / pl.col("r_value") * 100).abs().max()).item()
+    obj_r = (ref["r_value"].diff().drop_nulls() ** 2).sum()
+    obj_p = (j["py_value"].diff().drop_nulls() ** 2).sum()
+    ratio = obj_p / obj_r
+    assert max_pct < 1.0 and ratio < 1.02
+
+def test_issue2b_bg_within_r():
+    q = pl.read_csv(os.path.join(DATA_DIR, "bg_foods_capex_quarterly.csv"), try_parse_dates=True)
+    ref = pl.read_csv(os.path.join(DATA_DIR, "B_G_Foods_Capital_Expenditures_monthly_sum_disagg.csv"), try_parse_dates=True)
+    ref.columns = ["date", "r_value"]
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    out = a.fit_transform(q, datetime_col="date", target_col="value").rename({"y_disaggregated": "py_value"})
+    j = ref.join(out, on="date", how="inner")
+    max_pct = j.select(((pl.col("py_value") - pl.col("r_value")) / pl.col("r_value") * 100).abs().max()).item()
+    obj_r = (ref["r_value"].diff().drop_nulls() ** 2).sum()
+    obj_p = (j["py_value"].diff().drop_nulls() ** 2).sum()
+    ratio = obj_p / obj_r
+    assert max_pct < 1.0 and ratio < 1.02
 
 
