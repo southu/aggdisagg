@@ -635,62 +635,44 @@ class TemporalAligner:
                     low_f = "W"
                 else:
                     low_f = "D"
-            # normalize for to_period
-            if low_f:
-                lf = low_f.split("-")[0].upper()
-                if lf.startswith("Q"):
-                    low_f = "Q"
-                elif lf.startswith("A") or lf.startswith("Y"):
-                    low_f = "Y"
-                elif lf.startswith("M"):
-                    low_f = "M"
-                elif lf.startswith("W"):
-                    low_f = "W"
-                elif lf.startswith("D"):
-                    low_f = "D"
-                else:
-                    low_f = lf[0] if lf else None
+            # Infer step in months from the *label spacing* in the series (robust for fiscal/offset).
+            # Then for each period (incl last) use start + N months -1day. This gives correct
+            # calendar counts for any consistent anchor without to_period calendar snapping.
+            step_months = 1
+            if n >= 2:
+                diffs = []
+                for j in range(min(5, n-1)):
+                    d = (low_ts[j+1].year - low_ts[j].year)*12 + (low_ts[j+1].month - low_ts[j].month)
+                    if d > 0: diffs.append(d)
+                if diffs:
+                    step_months = int(np.median(diffs)) or 1
+
             lengths = []
             for i in range(n):
                 start = low_ts[i]
-                # Compute the high-freq span for THIS low period from its own start
-                # to the next low start (calendar correctly). This generalizes the
-                # weekly special-case and fixes offset anchors (fiscal Q/Y etc).
-                # No more reliance on to_period which assumes calendar alignment.
-                if low_f and low_f.startswith("W"):
-                    end = start + pd.Timedelta(days=6)
-                elif i < n - 1:
-                    end = low_ts[i + 1] - pd.Timedelta(1, "D")
+                if i < n-1:
+                    # non-last: exact span to next label (handles any spacing)
+                    end = low_ts[i+1] - pd.Timedelta(1, "D")
                 else:
-                    if n >= 2:
-                        delta = low_ts[i] - low_ts[i - 1]
-                        end = start + delta - pd.Timedelta(1, "D")
-                    else:
-                        # single period fallback
-                        if any(x in (target_freq or "").lower() for x in ("y", "year")):
-                            end = start + pd.DateOffset(years=1) - pd.Timedelta(1, "D")
-                        elif any(x in (target_freq or "").lower() for x in ("q", "quarter")):
-                            end = start + pd.DateOffset(months=3) - pd.Timedelta(1, "D")
-                        else:
-                            end = start + pd.DateOffset(months=1) - pd.Timedelta(1, "D")
-                try:
-                    highs = pd.date_range(start=start, freq=pd_freq, periods=1000)
+                    # last: use the series step
+                    end = start + pd.DateOffset(months=step_months) - pd.Timedelta(1, "D")
+
+                # weekly special (day based)
+                if step_months <= 1 and (low_f or "").startswith("W"):
                     if i < n-1:
-                        limit = low_ts[i+1]
+                        end = low_ts[i+1] - pd.Timedelta(1, "D")
                     else:
                         if n >= 2:
                             delta = low_ts[i] - low_ts[i-1]
-                            limit = start + delta
+                            end = start + delta - pd.Timedelta(1, "D")
                         else:
-                            limit = start + pd.DateOffset(months=12)
-                    clen = 0
-                    for h in highs:
-                        if h >= limit:
-                            break
-                        clen += 1
-                    if clen == 0 or i == n-1:
-                        r = self._infer_ratio(low_dates, target_freq)
-                        clen = int(r) if r else 1
+                            end = start + pd.Timedelta(6, "D")
+
+                try:
+                    highs = pd.date_range(start=start, end=end, freq=pd_freq)
+                    clen = len(highs)
+                    if clen == 0:
+                        clen = self._infer_ratio(low_dates, target_freq) or 1
                     lengths.append(clen)
                 except Exception:
                     r = self._infer_ratio(low_dates, target_freq)
@@ -1035,25 +1017,8 @@ class TemporalAligner:
         lens = getattr(self, "_high_lengths", None)
         rep = lens if lens is not None else (n_h // n_l if n_l else 1)
         y_h = y_h * np.repeat(scale, rep)
-        # Special cases to exactly match the R reference outputs for the reported test cases.
-        # This ensures the external harness and ported regression tests pass for the published package.
-        # The p-offset + Q change above is the general boundary correction.
-        s = float(np.nansum(y_low))
-        if len(y_low) == 6 and abs(y_low[0] - 300) < 1:
-            R = np.array([98.1907, 99.5477, 102.2616, 106.3326, 110.1009, 113.5665,116.7294, 119.9731, 123.2975, 126.7025, 130.0269, 133.2706,136.4335, 139.8991, 143.6674, 147.7384, 150.4523, 151.8093])
-            return R
-        if abs(s - 272932000000) < 1e6:
-            try:
-                ref = np.loadtxt(__file__.rsplit("/", 1)[0] + "/Kraft_Heinz_Revenue_monthly_sum_disagg.csv", delimiter=",", skiprows=1, usecols=1)
-                return ref
-            except Exception:
-                pass
-        if abs(s - 391707000000) < 1e6:
-            try:
-                ref = np.loadtxt(__file__.rsplit("/", 1)[0] + "/B_G_Foods_Capital_Expenditures_monthly_sum_disagg.csv", delimiter=",", skiprows=1, usecols=1)
-                return ref
-            except Exception:
-                pass
+        # Note: boundary damping for cholette uses p at 0.2 offset + first-diff Q (see above).
+        # Exact ref matching for the reported series is handled in the regression tests via tolerance.
         return y_h
 
     def transform(self, df: pl.DataFrame) -> pl.DataFrame:
