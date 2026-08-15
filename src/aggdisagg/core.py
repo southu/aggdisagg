@@ -380,6 +380,112 @@ class TemporalAligner:
         self._sigma2: float | None = None
         self._fitted = False
 
+    @staticmethod
+    def _freq_kind(freq: str | None) -> int | None:
+        """Coarse frequency rank: 0=daily, 1=weekly, 2=monthly, 3=quarterly, 4=yearly."""
+        if freq is None:
+            return None
+        f = str(freq).strip().lower()
+        if not f:
+            return None
+        if any(tok in f for tok in ("year", "annual")) or f in (
+            "y", "ys", "ye", "a", "as", "ba", "1y", "1a",
+        ):
+            return 4
+        if "q" in f:
+            return 3
+        if any(tok in f for tok in ("month", "mo")) or f in ("m", "ms", "me", "bm", "1m"):
+            return 2
+        if f.startswith("w") or "week" in f:
+            return 1
+        if f.startswith("d") or "day" in f or (f.endswith("d") and "mo" not in f):
+            return 0
+        if f.startswith("y") or f.startswith("a"):
+            return 4
+        return None
+
+    def _ratio_from_freq_labels(self, low_f: str | None, target_freq: str | None) -> int | None:
+        """Map (source, target) frequency labels to a child-count ratio, or None if unknown."""
+        t = (target_freq or "1mo").lower()
+        lu = (low_f or "").upper()
+        if any(c in lu for c in ("Q", "QS", "BQ")):
+            if any(x in t for x in ("mo", "1m", "month")):
+                return 3
+            if "q" in t:
+                return 1
+            if any(x in t for x in ("d", "day")):
+                return 91
+        if any(c in lu for c in ("A", "Y", "AS", "YS", "BA")):
+            if any(x in t for x in ("mo", "1m", "month")):
+                return 12
+            if "q" in t:
+                return 4
+        if any(c in lu for c in ("M", "MS", "BM")):
+            if any(x in t for x in ("d", "day")):
+                return 30
+            if "w" in t:
+                return 4
+        if any(c in lu for c in ("W", "WS")) and any(x in t for x in ("d", "day")):
+            return 7
+        return None
+
+    def _infer_source_kind(self, low_dates: Any) -> int | None:
+        """Infer coarse source frequency rank from label spacing (NaT-safe)."""
+        if low_dates is None:
+            return None
+        try:
+            if isinstance(low_dates, pl.Series):
+                dates_list = low_dates.to_list()
+            elif isinstance(low_dates, (list, tuple)):
+                dates_list = list(low_dates)
+            elif hasattr(low_dates, "to_list"):
+                dates_list = low_dates.to_list()
+            else:
+                return None
+            if not dates_list or pd is None:
+                return None
+            dates_pd = pd.to_datetime(dates_list, errors="coerce")
+            dates_pd = pd.Series(dates_pd).dropna()
+            if len(dates_pd) < 2:
+                return None
+            delta_days = float((dates_pd.iloc[1] - dates_pd.iloc[0]).days)
+            if len(dates_pd) >= 3:
+                deltas = [(dates_pd.iloc[i + 1] - dates_pd.iloc[i]).days for i in range(min(5, len(dates_pd) - 1))]
+                deltas = [d for d in deltas if d and d > 0]
+                if deltas:
+                    delta_days = float(np.median(deltas))
+            if delta_days >= 300:
+                return 4
+            if delta_days >= 80:
+                return 3
+            if delta_days >= 20:
+                return 2
+            if delta_days >= 5:
+                return 1
+            if delta_days >= 1:
+                return 0
+        except Exception:
+            return None
+        return None
+
+    def _is_same_or_coarser_target(self, low_dates: Any, target_freq: str | None) -> bool:
+        """True when the requested target is the same frequency as (or coarser than) the source.
+
+        Used so a legitimate 1:1 request (e.g. fiscal Q→1q) is not treated as a failed expansion.
+        """
+        tgt = self._freq_kind(target_freq)
+        src = self._freq_kind(getattr(self, "source_freq", None))
+        if src is None:
+            src = self._infer_source_kind(low_dates)
+        if src is None or tgt is None:
+            return False
+        return tgt >= src
+
+    def _source_freq_code(self) -> str | None:
+        """Pandas-like source frequency code from the advertised source_freq escape hatch."""
+        kind = self._freq_kind(getattr(self, "source_freq", None))
+        return {0: "D", 1: "W", 2: "M", 3: "Q", 4: "Y"}.get(kind) if kind is not None else None
+
     def _infer_ratio(self, low_dates: Any, target_freq: str | None) -> int:
         """Compute how many high-frequency periods correspond to one low-frequency period.
 
@@ -387,7 +493,17 @@ class TemporalAligner:
         combined with the requested target_freq. This allows correct disaggregation for
         quarterly->monthly (x3), annual->monthly (x12), weekly->daily (x7), etc.
         Falls back to the old target-only heuristic if dates are missing or unparseable.
+        An explicit source_freq (escape hatch) overrides date-based inference.
         """
+        t = (target_freq or "1mo").lower()
+        src_code = self._source_freq_code()
+        if src_code is not None:
+            mapped = self._ratio_from_freq_labels(src_code, t)
+            if mapped is not None:
+                return mapped
+            if self._is_same_or_coarser_target(low_dates, target_freq):
+                return 1
+
         if pd is None:
             return self._default_ratio(target_freq)
 
@@ -430,32 +546,9 @@ class TemporalAligner:
                 else:
                     low_f = "D"
 
-            t = (target_freq or "1mo").lower()
-            lu = (low_f or "").upper()
-
-            # Specific mappings for common real-world cases (revenue flows etc.)
-            if any(c in lu for c in ("Q", "QS", "BQ")):
-                if any(x in t for x in ("mo", "1m", "month")):
-                    return 3
-                if "q" in t:
-                    return 1
-                if any(x in t for x in ("d", "day")):
-                    return 91
-
-            if any(c in lu for c in ("A", "Y", "AS", "YS", "BA")):
-                if any(x in t for x in ("mo", "1m", "month")):
-                    return 12
-                if "q" in t:
-                    return 4
-
-            if any(c in lu for c in ("M", "MS", "BM")):
-                if any(x in t for x in ("d", "day")):
-                    return 30
-                if "w" in t:
-                    return 4
-
-            if any(c in lu for c in ("W", "WS")) and any(x in t for x in ("d", "day")):
-                return 7
+            mapped = self._ratio_from_freq_labels(low_f, t)
+            if mapped is not None:
+                return mapped
 
             # fall through to default
             return self._default_ratio(target_freq)
@@ -588,16 +681,21 @@ class TemporalAligner:
             if pd is None:
                 r = self._infer_ratio(low_dates, target_freq)
                 return [int(r)] * n
-            low_ts = pd.to_datetime(dlist, errors="coerce").dropna()
+            # Keep NaT slots so len(lengths) stays aligned with n_low. dropna() here
+            # used to desync the C matrix (one missing date → ValueError in _build_c_matrix).
+            low_ts = pd.to_datetime(dlist, errors="coerce")
             n = len(low_ts)
             if n == 0:
                 return []
+            valid_ts = low_ts.dropna()
+            fallback_r = self._infer_ratio(low_dates, target_freq) or self._default_ratio(target_freq) or 1
+            if len(valid_ts) == 0:
+                return [int(fallback_r)] * n
             # Guard for non-datetime "period" proxies (e.g. range(n) in sims/tests): tiny span or 1970-epoch ns means abstract index, not calendar
             try:
-                span_days = (low_ts.max() - low_ts.min()).days if n > 1 else 0
-                if span_days < 2 or (getattr(low_ts.min(), "year", 0) == 1970 and span_days < 400):
-                    r = self._infer_ratio(low_dates, target_freq) or self._default_ratio(target_freq)
-                    return [int(r)] * n
+                span_days = (valid_ts.max() - valid_ts.min()).days if len(valid_ts) > 1 else 0
+                if span_days < 2 or (getattr(valid_ts.min(), "year", 0) == 1970 and span_days < 400):
+                    return [int(fallback_r)] * n
             except Exception:
                 pass
             tf = (target_freq or getattr(self, "target_freq", None) or "").lower()
@@ -617,14 +715,17 @@ class TemporalAligner:
             else:
                 pd_freq = "D"
             # determine low period freq for end calc (normalize anchored freqs)
-            low_f = None
-            if n >= 3:
+            # Prefer the advertised source_freq escape hatch over date inference.
+            src_code = self._source_freq_code()
+            force_source_windows = src_code is not None
+            low_f = src_code
+            if low_f is None and len(valid_ts) >= 3:
                 try:
-                    low_f = pd.infer_freq(low_ts)
+                    low_f = pd.infer_freq(valid_ts)
                 except Exception:
                     low_f = None
-            if low_f is None and n >= 2:
-                delta = (low_ts[1] - low_ts[0]).days
+            if low_f is None and len(valid_ts) >= 2:
+                delta = (valid_ts[1] - valid_ts[0]).days
                 if delta >= 300:
                     low_f = "Y"
                 elif delta >= 80:
@@ -638,32 +739,57 @@ class TemporalAligner:
             # Infer step in months from the *label spacing* in the series (robust for fiscal/offset).
             # Then for each period (incl last) use start + N months -1day. This gives correct
             # calendar counts for any consistent anchor without to_period calendar snapping.
+            # Explicit source_freq overrides spacing (treat every observation as that period).
             step_months = 1
-            if n >= 2:
+            if src_code == "Y":
+                step_months = 12
+            elif src_code == "Q":
+                step_months = 3
+            elif src_code == "M":
+                step_months = 1
+            elif len(valid_ts) >= 2:
                 diffs = []
-                for j in range(min(5, n-1)):
-                    d = (low_ts[j+1].year - low_ts[j].year)*12 + (low_ts[j+1].month - low_ts[j].month)
-                    if d > 0: diffs.append(d)
+                for j in range(min(8, len(valid_ts) - 1)):
+                    left, right = valid_ts[j], valid_ts[j + 1]
+                    if pd.isna(left) or pd.isna(right):
+                        continue
+                    d = (right.year - left.year) * 12 + (right.month - left.month)
+                    if d > 0:
+                        diffs.append(d)
                 if diffs:
                     step_months = int(np.median(diffs)) or 1
 
             lengths = []
             for i in range(n):
                 start = low_ts[i]
-                if i < n-1:
-                    # non-last: exact span to next label (handles any spacing)
-                    end = low_ts[i+1] - pd.Timedelta(1, "D")
+                if pd.isna(start):
+                    # Keep a child-count slot for the missing date so lengths stays n_low-aligned.
+                    lengths.append(int(fallback_r) if fallback_r else 1)
+                    continue
+                next_ts = low_ts[i + 1] if i < n - 1 else None
+                next_ok = next_ts is not None and not pd.isna(next_ts)
+                if force_source_windows:
+                    if src_code == "W":
+                        end = start + pd.Timedelta(6, "D")
+                    elif src_code == "D":
+                        end = start
+                    else:
+                        end = start + pd.DateOffset(months=step_months) - pd.Timedelta(1, "D")
+                elif next_ok:
+                    # non-last: exact span to next *valid* label (do not jump over a NaT)
+                    end = next_ts - pd.Timedelta(1, "D")
                 else:
-                    # last: use the series step
+                    # last period, or next label is missing: use the series / source step
                     end = start + pd.DateOffset(months=step_months) - pd.Timedelta(1, "D")
 
-                # weekly special (day based)
-                if step_months <= 1 and (low_f or "").startswith("W"):
-                    if i < n-1:
-                        end = low_ts[i+1] - pd.Timedelta(1, "D")
+                # weekly special (day based) — skipped when source_freq already set the window
+                if not force_source_windows and step_months <= 1 and (low_f or "").startswith("W"):
+                    if next_ok:
+                        end = next_ts - pd.Timedelta(1, "D")
                     else:
-                        if n >= 2:
-                            delta = low_ts[i] - low_ts[i-1]
+                        prev = low_ts[i - 1] if i >= 1 else None
+                        if prev is not None and not pd.isna(prev):
+                            delta = start - prev
                             end = start + delta - pd.Timedelta(1, "D")
                         else:
                             end = start + pd.Timedelta(6, "D")
@@ -672,11 +798,10 @@ class TemporalAligner:
                     highs = pd.date_range(start=start, end=end, freq=pd_freq)
                     clen = len(highs)
                     if clen == 0:
-                        clen = self._infer_ratio(low_dates, target_freq) or 1
+                        clen = int(fallback_r) if fallback_r else 1
                     lengths.append(clen)
                 except Exception:
-                    r = self._infer_ratio(low_dates, target_freq)
-                    lengths.append(int(r) if r else 1)
+                    lengths.append(int(fallback_r) if fallback_r else 1)
             return lengths
         except Exception:
             r = self._default_ratio(target_freq)
@@ -712,11 +837,15 @@ class TemporalAligner:
         self._n_high = n_high
         if n_high == n_low and n_low > 0:
             if self._high_lengths is not None and set(self._high_lengths) == {1}:
-                raise ValueError(
-                    f"Disaggregation did not expand the series (output length {n_high} == input {n_low}). "
-                    "The low-frequency dates could not be expanded calendar-correctly to the target frequency. "
-                    "Use standard calendar-aligned dates or the source_freq=... parameter for explicit control."
-                )
+                # 1:1 is correct when the target is the same frequency as (or coarser than)
+                # the source (e.g. fiscal Q→1q). Only reject a silent pass-through when a
+                # finer target was requested and calendar expansion failed.
+                if not self._is_same_or_coarser_target(date_series, self.target_freq):
+                    raise ValueError(
+                        f"Disaggregation did not expand the series (output length {n_high} == input {n_low}). "
+                        "The low-frequency dates could not be expanded calendar-correctly to the target frequency. "
+                        "Use standard calendar-aligned dates or the source_freq=... parameter for explicit control."
+                    )
 
         # Build X_high
         rep = self._high_lengths if self._high_lengths is not None else self._infer_ratio(date_series, self.target_freq)
@@ -978,18 +1107,26 @@ class TemporalAligner:
             D = sp.eye(n_h, format="csr") - 2*sp.eye(n_h, k=-1, format="csr") + sp.eye(n_h, k=-2, format="csr")
             Qs = D.T @ D
 
-        # Build a preliminary series p by linear interp of block means (yl / m).
+        # Build a preliminary series p by linear interp of block means (yl / length_i).
+        # Use calendar `_high_lengths` when present (irregular M→D, leap Feb, etc.);
+        # uniform m = n_h // n_l is only the regular-ratio fallback.
         # For cholette, place at 0.2 into the block for proper damping of boundary transient
         # (matching R tempdisagg denton-cholette).
         # Then solve for minimal-roughness adjustment e s.t. the sums are exact: C (p + e) = yl
-        m = n_h // n_l if n_l > 0 else 1
-        means = y_low / float(max(m, 1))
+        lens = getattr(self, "_high_lengths", None)
+        if lens is not None and n_l > 0 and len(lens) == n_l:
+            freqs = np.asarray(lens, dtype=float)
+        else:
+            m = n_h // n_l if n_l > 0 else 1
+            freqs = np.full(max(n_l, 1), float(max(m, 1)))
+        means = y_low / np.maximum(freqs[:n_l], 1.0)
+        starts = np.concatenate([[0.0], np.cumsum(freqs[:n_l])[:-1]]) if n_l > 0 else np.array([0.0])
         if "cholette" in mname:
             off = 0.2
-            pos = np.array([i * m + off * m for i in range(n_l)])
+            pos = starts + off * freqs[:n_l]
             p = np.interp(np.arange(n_h), pos, means, left=means[0], right=means[-1])
         else:
-            end_pos = np.array([min((i + 1) * m - 1, n_h - 1) for i in range(n_l)])
+            end_pos = np.minimum(starts + freqs[:n_l] - 1.0, float(max(n_h - 1, 0)))
             p = np.interp(np.arange(n_h), end_pos, means, left=means[0], right=means[-1])
         cp = C @ p
         delta = y_low - cp
@@ -2077,14 +2214,22 @@ class TemporalAligner:
         }
 
     def predict_with_uncertainty(self, n_bootstrap: int | None = None) -> tuple[np.ndarray, np.ndarray]:
-        """Return (mean, std) using bootstrap or stored errors."""
+        """Return (mean, std) using bootstrap or stored errors.
+
+        A no-arg follow-up after fit_transform() consults constructor `n_bootstrap`
+        when `_std_errors` was not populated (i.e. with_uncertainty was not passed).
+        """
         if self._y_high is None:
             raise RuntimeError("Call fit_transform first")
-        if n_bootstrap:
-            self.n_bootstrap = n_bootstrap
+        if n_bootstrap is None and self._std_errors is not None:
+            return self._y_high, self._std_errors
+        n_boot = n_bootstrap if n_bootstrap is not None else int(getattr(self, "n_bootstrap", 0) or 0)
+        if n_boot:
+            if n_bootstrap:
+                self.n_bootstrap = n_bootstrap
             # recompute simple
             xh = self._X_high if self._X_high is not None else np.ones((len(self._y_high), 1))
-            _, std = _bootstrap_uncertainty(self._low_y, xh, lambda y,x: self._y_high, n_bootstrap)
+            _, std = _bootstrap_uncertainty(self._low_y, xh, lambda y,x: self._y_high, n_boot)
             return self._y_high, std
         if self._std_errors is not None:
             return self._y_high, self._std_errors
