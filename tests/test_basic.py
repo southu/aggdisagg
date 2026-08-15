@@ -1020,3 +1020,113 @@ def test_issue2b_bg_within_r():
     assert max_pct < 30 and ratio < 1.1
 
 
+# ------------------------------------------------------------------
+# Confirmed-bug reproductions (real CSV fixtures; expected RED until fixed)
+# See ROOT_CAUSE_ANALYSIS.md candidates C3, C4, C5, C8, C10.
+# ------------------------------------------------------------------
+
+def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
+    """C3: a NaT in real Kraft quarterly dates must not dropna() the lengths vector.
+
+    `_compute_high_lengths` parses with errors='coerce' then dropna(), so
+    len(lengths) < n_low and `_build_c_matrix` raises
+    'lengths length must match n_low'.
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    dates = q["date"].to_list()
+    dates[1] = None
+    messy = q.with_columns(pl.Series("date", dates))
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    lengths = a._compute_high_lengths(messy["date"], "1mo")
+    assert len(lengths) == messy.height, (
+        f"NaT dropna desynced lengths ({len(lengths)}) from n_low ({messy.height})"
+    )
+    out = a.fit_transform(messy, datetime_col="date", target_col="value")
+    assert out.height > 0
+
+
+def test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected():
+    """C4: PepsiCo quarterly → 1q is a legitimate 1:1 expansion, not a failed fiscal inference.
+
+    `_prepare_data` raises whenever every computed length is 1, so same-frequency
+    requests (including fiscal Sep-start quarters) are rejected as 'did not expand'.
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
+    out = a.fit_transform(q, datetime_col="date", target_col="value")
+    assert out.height == q.height
+    assert np.allclose(
+        out["y_disaggregated"].to_numpy(),
+        q["value"].to_numpy().astype(float),
+        atol=1e-6,
+    )
+
+
+def test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series():
+    """C5: constructor n_bootstrap must populate std after a no-arg follow-up call.
+
+    `fit_transform` without with_uncertainty=True leaves `_std_errors` None, and
+    `predict_with_uncertainty()` does not consult `self.n_bootstrap`, so the
+    fallback is an all-zero std array.
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "bg_foods_capex_quarterly.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", n_bootstrap=20)
+    high = a.fit_transform(q, datetime_col="date", target_col="value")
+    _mean, std = a.predict_with_uncertainty()
+    assert len(std) == high.height
+    assert np.any(np.asarray(std) > 0), "predict_with_uncertainty() returned all-zero std"
+
+
+def test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly():
+    """C8: source_freq is stored and named in the 1:1 error, but never read.
+
+    Explicit source_freq='Y' on Kraft quarterly targeting monthly must force
+    12 children per observation (the advertised escape hatch), not silently
+    keep the inferred quarterly 3-month expansion.
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
+    out = a.fit_transform(q, datetime_col="date", target_col="value")
+    assert out.height == q.height * 12, (
+        f"source_freq='Y' was ignored; height {out.height} != {q.height * 12}"
+    )
+
+
+def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
+    """C10: Denton-Cholette preliminary p must use calendar `_high_lengths`.
+
+    Kraft monthly Jan-Mar 2016 is a leap-year window (31/29/31). `_apply_denton`
+    still builds p with uniform m = n_high // n_low (=30) and y_low/m block
+    means, so knots sit off the true month boundaries.
+    """
+    from unittest.mock import patch
+
+    raw = pl.read_csv(
+        os.path.join(DATA_DIR, "Kraft_Heinz_Revenue_monthly_sum_disagg.csv"),
+        try_parse_dates=True,
+    )
+    monthly = raw.head(3).rename({raw.columns[0]: "date", raw.columns[1]: "value"})
+    captured = []
+    orig_interp = np.interp
+
+    def _spy_interp(x, xp, fp, *args, **kwargs):
+        captured.append((np.asarray(xp, dtype=float).copy(), np.asarray(fp, dtype=float).copy()))
+        return orig_interp(x, xp, fp, *args, **kwargs)
+
+    a = TemporalAligner(method="denton-cholette", target_freq="1d", agg="sum")
+    with patch("aggdisagg.core.np.interp", side_effect=_spy_interp):
+        a.fit_transform(monthly, datetime_col="date", target_col="value")
+    lengths = np.asarray(a._high_lengths, dtype=float)
+    assert list(lengths.astype(int)) == [31, 29, 31]
+    y_low = np.asarray(a._low_y, dtype=float)
+    starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+    calendar_pos = starts + 0.2 * lengths
+    calendar_means = y_low / lengths
+    assert captured, "Denton-Cholette never built a preliminary p via np.interp"
+    xp, fp = captured[0]
+    assert np.allclose(xp, calendar_pos) and np.allclose(fp, calendar_means), (
+        "Denton-Cholette preliminary p ignores variable _high_lengths: "
+        f"knots={xp} means={fp} vs calendar knots={calendar_pos} means={calendar_means}"
+    )
+
+

@@ -1,0 +1,62 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo/.venv/bin/python
+cachedir: .pytest_cache
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collecting ... collected 1 item
+
+tests/test_basic.py::test_c10_denton_p_uses_variable_high_lengths_on_real_monthly FAILED [100%]
+
+=================================== FAILURES ===================================
+_________ test_c10_denton_p_uses_variable_high_lengths_on_real_monthly _________
+
+    def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
+        """C10: Denton-Cholette preliminary p must use calendar `_high_lengths`.
+    
+        Kraft monthly Jan-Mar 2016 is a leap-year window (31/29/31). `_apply_denton`
+        still builds p with uniform m = n_high // n_low (=30) and y_low/m block
+        means, so knots sit off the true month boundaries.
+        """
+        from unittest.mock import patch
+    
+        raw = pl.read_csv(
+            os.path.join(DATA_DIR, "Kraft_Heinz_Revenue_monthly_sum_disagg.csv"),
+            try_parse_dates=True,
+        )
+        monthly = raw.head(3).rename({raw.columns[0]: "date", raw.columns[1]: "value"})
+        captured = []
+        orig_interp = np.interp
+    
+        def _spy_interp(x, xp, fp, *args, **kwargs):
+            captured.append((np.asarray(xp, dtype=float).copy(), np.asarray(fp, dtype=float).copy()))
+            return orig_interp(x, xp, fp, *args, **kwargs)
+    
+        a = TemporalAligner(method="denton-cholette", target_freq="1d", agg="sum")
+        with patch("aggdisagg.core.np.interp", side_effect=_spy_interp):
+            a.fit_transform(monthly, datetime_col="date", target_col="value")
+        lengths = np.asarray(a._high_lengths, dtype=float)
+        assert list(lengths.astype(int)) == [31, 29, 31]
+        y_low = np.asarray(a._low_y, dtype=float)
+        starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+        calendar_pos = starts + 0.2 * lengths
+        calendar_means = y_low / lengths
+        assert captured, "Denton-Cholette never built a preliminary p via np.interp"
+        xp, fp = captured[0]
+>       assert np.allclose(xp, calendar_pos) and np.allclose(fp, calendar_means), (
+            "Denton-Cholette preliminary p ignores variable _high_lengths: "
+            f"knots={xp} means={fp} vs calendar knots={calendar_pos} means={calendar_means}"
+        )
+E       AssertionError: Denton-Cholette preliminary p ignores variable _high_lengths: knots=[ 6. 36. 66.] means=[80711530.17344667 79544549.21002834 77210587.28319167] vs calendar knots=[ 6.2 36.8 66.2] means=[78107932.42591614 82287464.70002931 74719923.17728226]
+E       assert (False)
+E        +  where False = <function allclose at 0x711d59367db0>(array([ 6., 36., 66.]), array([ 6.2, 36.8, 66.2]))
+E        +    where <function allclose at 0x711d59367db0> = np.allclose
+
+tests/test_basic.py:1127: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_basic.py::test_c10_denton_p_uses_variable_high_lengths_on_real_monthly - AssertionError: Denton-Cholette preliminary p ignores variable _high_lengths: knots=[ 6. 36. 66.] means=[80711530.17344667 79544549.21002834 77210587.28319167] vs calendar knots=[ 6.2 36.8 66.2] means=[78107932.42591614 82287464.70002931 74719923.17728226]
+assert (False)
+ +  where False = <function allclose at 0x711d59367db0>(array([ 6., 36., 66.]), array([ 6.2, 36.8, 66.2]))
+ +    where <function allclose at 0x711d59367db0> = np.allclose
+============================== 1 failed in 0.59s ===============================

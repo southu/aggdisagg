@@ -1,0 +1,242 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo/.venv/bin/python
+cachedir: .pytest_cache
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collecting ... collected 1 item
+
+tests/test_basic.py::test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected FAILED [100%]
+
+=================================== FAILURES ===================================
+_______ test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected ________
+
+    def test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected():
+        """C4: PepsiCo quarterly → 1q is a legitimate 1:1 expansion, not a failed fiscal inference.
+    
+        `_prepare_data` raises whenever every computed length is 1, so same-frequency
+        requests (including fiscal Sep-start quarters) are rejected as 'did not expand'.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+        a = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
+>       out = a.fit_transform(q, datetime_col="date", target_col="value")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_basic.py:1056: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x7221c1abd820>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value', extrapolate = None
+with_uncertainty = False, confidence_level = 0.9, return_dataframe = True
+include_dates = True
+
+    def fit_transform(
+        self,
+        df: pl.DataFrame | pl.LazyFrame | Any,
+        datetime_col: str = "date",
+        target_col: str = "y",
+        extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
+        with_uncertainty: bool = False,
+        confidence_level: float = 0.90,
+        return_dataframe: bool = True,
+        include_dates: bool = True,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        """Fit and return the disaggregated high-frequency series.
+    
+        Parameters
+        ----------
+        df : DataFrame-like
+            Low-frequency data with datetime and target column.
+        datetime_col : str
+            Name of datetime column.
+        target_col : str
+            Name of value column to disaggregate.
+        extrapolate : {"nan", "hold", "linear", "drop"} or None
+            Policy for high-freq periods whose low-freq anchor was NaN (missing/unreported)
+            or beyond last valid anchor. Default (None) uses the instance setting (now "nan").
+            - "nan": leave NaN (honest for missing inputs)
+            - "hold": fill with last valid observed value (for NaN-input blocks or end)
+            - "linear": linear extend from last slope
+            - "drop": truncate output to drop periods originating from NaN low-freq inputs (shortens)
+        return_dataframe : bool, default True
+            If True, return a Polars DataFrame. If False, return exactly the prior
+            (pre-1.10) behavior: DataFrame containing only the value column(s)
+            (y_disaggregated +/- bands), without dates. Back-compat escape hatch.
+        include_dates : bool, default True
+            When return_dataframe=True, prepend a pl.Date column named "date" containing
+            the expanded high-frequency dates (same as disaggregate_columns(..., include_dates=True)).
+            Dates are generated via expand_high_freq_dates using the aligner's week_start etc.
+            Ignored when return_dataframe=False.
+    
+        Returns
+        -------
+        pl.DataFrame (or LazyFrame)
+            By default (return_dataframe=True): a DataFrame with "date" (if include_dates)
+            prepended and "y_disaggregated" (optionally + y_std/lower/upper when with_uncertainty).
+            When return_dataframe=False: exactly the prior behavior (DataFrame with value columns only, no date).
+        """
+        # Support lazy: collect for heavy ops
+        is_lazy = isinstance(df, pl.LazyFrame)
+        if is_lazy:
+            df = df.collect()
+    
+        # xarray support
+        if xr is not None and isinstance(df, xr.DataArray):
+            # Convert to polars for processing; handle unnamed DataArray defensively
+            try:
+                if df.name is None:
+                    df = df.rename("y")
+                pdf = df.to_dataframe().reset_index()
+                df = pl.from_pandas(pdf)
+            except Exception:
+                try:
+                    df = pl.from_pandas(df.to_pandas())
+                except Exception:
+                    df = pl.from_pandas(pd.DataFrame({"t": range(len(df)), "y": np.asarray(df)}))
+            datetime_col = df.columns[0]  # assume first is time
+    
+        # Capture low-frequency dates (supports polars/pandas inputs) for optional attachment.
+        # Done before fit() which normalizes further for pandas paths.
+        low_dates = None
+        try:
+            if hasattr(df, "columns") and datetime_col in df.columns:
+                col = df[datetime_col]
+                if isinstance(col, pl.Series):
+                    low_dates = col.clone()
+                elif pd is not None and isinstance(df, pd.DataFrame):
+                    low_dates = pl.from_pandas(pd.Series(col).reset_index(drop=True))
+                else:
+                    low_dates = pl.Series(list(col))
+            elif (pd is not None and isinstance(df, pd.DataFrame) and df.index.name == datetime_col) or (hasattr(df, "index") and isinstance(df.index, pd.DatetimeIndex)):
+                # pandas with dt index as date
+                low_dates = pl.from_pandas(df.index.to_series().reset_index(drop=True))
+        except Exception:
+            low_dates = None
+    
+        # allow per-call override without mutating instance permanently
+        orig_extrap = self.extrapolate
+        if extrapolate is not None:
+            self.extrapolate = extrapolate
+    
+        try:
+>           self.fit(df, datetime_col, target_col)
+
+src/aggdisagg/core.py:1128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x7221c1abd820>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value'
+
+    def fit(self, df: Any, datetime_col: str = "date", target_col: str = "y") -> TemporalAligner:
+        # Validate method early (before data checks) so bad method raises ValueError even on incomplete df
+        allowed_methods = ("uniform", "linear", "denton", "denton-cholette", "chow-lin", "chow-lin-opt", "chowlin", "litterman", "litterman-opt", "fernandez")
+        if self.method not in allowed_methods:
+            raise ValueError(f"Unknown method: {self.method}")
+        # Support pandas DatetimeIndex (wide or series)
+        if pd is not None and isinstance(df, pd.DataFrame):
+            if isinstance(df.index, pd.DatetimeIndex):
+                pdf = df.reset_index()
+                datetime_col = pdf.columns[0]
+                if target_col not in pdf.columns and len(pdf.columns) > 1:
+                    target_col = pdf.columns[1]  # auto detect first data col
+                df = pl.from_pandas(pdf)
+            else:
+                if target_col not in df.columns:
+                    if len(df.columns) > 0:
+                        target_col = df.columns[0]
+                    else:
+                        raise KeyError(f"target_col '{target_col}' not found")  # pragma: no cover
+                df = pl.from_pandas(df)
+    
+        if pd is not None and isinstance(df, pd.Series):
+            # pandas Series (DTI or not) - support for itype pandas_series in tests and general use
+            pdf = df.reset_index()
+            if len(pdf.columns) >= 1:
+                datetime_col = pdf.columns[0]
+            if len(pdf.columns) >= 2:
+                target_col = pdf.columns[1]
+            else:
+                # series with no index name, values are the target
+                target_col = "y" if "y" in pdf.columns else pdf.columns[0]
+            df = pl.from_pandas(pdf)
+    
+        if datetime_col not in df.columns:
+            raise KeyError(f"datetime_col '{datetime_col}' not found in df")
+>       y_low, X_high, _n_high = self._prepare_data(df, datetime_col, target_col)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/aggdisagg/core.py:774: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x7221c1abd820>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value'
+
+    def _prepare_data(
+        self, df: pl.DataFrame, datetime_col: str = "date", target_col: str = "y"
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Extract low y, build high-freq X (if indicators), compute sizes."""
+        self._datetime_col = datetime_col
+        self._target_col = target_col
+    
+        y_low = df[target_col].to_numpy().astype(float)
+        n_low = len(y_low)
+        self._n_low = n_low
+    
+        if n_low == 0:
+            # empty input: set trivial state, return empty high
+            self._n_high = 0
+            self._high_lengths = np.array([], dtype=int)
+            self._C = np.zeros((0, 0), dtype=float)
+            self._X_high = np.zeros((0, 1), dtype=float)
+            self._low_y = y_low
+            self._y_high = np.array([], dtype=float)
+            return y_low, self._X_high, 0
+    
+        # Use dates when available to pick correct multiplier (e.g. Q->M is 3 not 12)
+        date_series = df[datetime_col] if datetime_col in df.columns else None
+        ws_for_compute = getattr(self, "week_start", None)
+        lengths = self._compute_high_lengths(date_series, self.target_freq, week_start=ws_for_compute)
+        self._high_lengths = np.asarray(lengths, dtype=int) if lengths else None
+        n_high = int(np.sum(self._high_lengths)) if self._high_lengths is not None and len(self._high_lengths) > 0 else (n_low * self._infer_ratio(date_series, self.target_freq))
+        self._n_high = n_high
+        if n_high == n_low and n_low > 0:
+            if self._high_lengths is not None and set(self._high_lengths) == {1}:
+>               raise ValueError(
+                    f"Disaggregation did not expand the series (output length {n_high} == input {n_low}). "
+                    "The low-frequency dates could not be expanded calendar-correctly to the target frequency. "
+                    "Use standard calendar-aligned dates or the source_freq=... parameter for explicit control."
+                )
+E               ValueError: Disaggregation did not expand the series (output length 39 == input 39). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
+
+src/aggdisagg/core.py:715: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_basic.py::test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected - ValueError: Disaggregation did not expand the series (output length 39 == input 39). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
+============================== 1 failed in 0.56s ===============================

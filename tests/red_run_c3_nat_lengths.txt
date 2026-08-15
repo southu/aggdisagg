@@ -1,0 +1,42 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo/.venv/bin/python
+cachedir: .pytest_cache
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collecting ... collected 1 item
+
+tests/test_basic.py::test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low FAILED [100%]
+
+=================================== FAILURES ===================================
+________ test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low ________
+
+    def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
+        """C3: a NaT in real Kraft quarterly dates must not dropna() the lengths vector.
+    
+        `_compute_high_lengths` parses with errors='coerce' then dropna(), so
+        len(lengths) < n_low and `_build_c_matrix` raises
+        'lengths length must match n_low'.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+        dates = q["date"].to_list()
+        dates[1] = None
+        messy = q.with_columns(pl.Series("date", dates))
+        a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+        lengths = a._compute_high_lengths(messy["date"], "1mo")
+>       assert len(lengths) == messy.height, (
+            f"NaT dropna desynced lengths ({len(lengths)}) from n_low ({messy.height})"
+        )
+E       AssertionError: NaT dropna desynced lengths (41) from n_low (42)
+E       assert 41 == 42
+E        +  where 41 = len([6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
+E        +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 null       \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+
+tests/test_basic.py:1041: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_basic.py::test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low - AssertionError: NaT dropna desynced lengths (41) from n_low (42)
+assert 41 == 42
+ +  where 41 = len([6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
+ +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 null       \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+============================== 1 failed in 0.63s ===============================

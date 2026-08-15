@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo/.venv/bin/python
+cachedir: .pytest_cache
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collecting ... collected 1 item
+
+tests/test_basic.py::test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly FAILED [100%]
+
+=================================== FAILURES ===================================
+________ test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly _________
+
+    def test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly():
+        """C8: source_freq is stored and named in the 1:1 error, but never read.
+    
+        Explicit source_freq='Y' on Kraft quarterly targeting monthly must force
+        12 children per observation (the advertised escape hatch), not silently
+        keep the inferred quarterly 3-month expansion.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+        a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
+        out = a.fit_transform(q, datetime_col="date", target_col="value")
+>       assert out.height == q.height * 12, (
+            f"source_freq='Y' was ignored; height {out.height} != {q.height * 12}"
+        )
+E       AssertionError: source_freq='Y' was ignored; height 126 != 504
+E       assert 126 == (42 * 12)
+E        +  where 126 = shape: (126, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 y_disaggregated \u2502\n\u2502 ---        \u2506 ---             \u2502\n\u2502 date       \u2506 f64             \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 2.3747e9        \u2502\n\u2502 2016-02-01 \u2506 2.3747e9        \u2502\n\u2502 2016-03-01 \u2506 2.3747e9        \u2502\n\u2502 2016-04-01 \u2506 2.1900e9        \u2502\n\u2502 2016-05-01 \u2506 2.1900e9        \u2502\n\u2502 \u2026          \u2506 \u2026               \u2502\n\u2502 2026-02-01 \u2506 2.1180e9        \u2502\n\u2502 2026-03-01 \u2506 2.1180e9        \u2502\n\u2502 2026-04-01 \u2506 2.0157e9        \u2502\n\u2502 2026-05-01 \u2506 2.0157e9        \u2502\n\u2502 2026-06-01 \u2506 2.0157e9        \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+E        +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 2016-04-01 \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+
+tests/test_basic.py:1090: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_basic.py::test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly - AssertionError: source_freq='Y' was ignored; height 126 != 504
+assert 126 == (42 * 12)
+ +  where 126 = shape: (126, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 y_disaggregated \u2502\n\u2502 ---        \u2506 ---             \u2502\n\u2502 date       \u2506 f64             \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 2.3747e9        \u2502\n\u2502 2016-02-01 \u2506 2.3747e9        \u2502\n\u2502 2016-03-01 \u2506 2.3747e9        \u2502\n\u2502 2016-04-01 \u2506 2.1900e9        \u2502\n\u2502 2016-05-01 \u2506 2.1900e9        \u2502\n\u2502 \u2026          \u2506 \u2026               \u2502\n\u2502 2026-02-01 \u2506 2.1180e9        \u2502\n\u2502 2026-03-01 \u2506 2.1180e9        \u2502\n\u2502 2026-04-01 \u2506 2.0157e9        \u2502\n\u2502 2026-05-01 \u2506 2.0157e9        \u2502\n\u2502 2026-06-01 \u2506 2.0157e9        \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+ +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 2016-04-01 \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+============================== 1 failed in 0.51s ===============================

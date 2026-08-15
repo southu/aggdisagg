@@ -1,0 +1,376 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo/.venv/bin/python
+cachedir: .pytest_cache
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-red-repro-tests-20260815-172818/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collecting ... collected 5 items
+
+tests/test_basic.py::test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low FAILED [ 20%]
+tests/test_basic.py::test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected FAILED [ 40%]
+tests/test_basic.py::test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series FAILED [ 60%]
+tests/test_basic.py::test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly FAILED [ 80%]
+tests/test_basic.py::test_c10_denton_p_uses_variable_high_lengths_on_real_monthly FAILED [100%]
+
+=================================== FAILURES ===================================
+________ test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low ________
+
+    def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
+        """C3: a NaT in real Kraft quarterly dates must not dropna() the lengths vector.
+    
+        `_compute_high_lengths` parses with errors='coerce' then dropna(), so
+        len(lengths) < n_low and `_build_c_matrix` raises
+        'lengths length must match n_low'.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+        dates = q["date"].to_list()
+        dates[1] = None
+        messy = q.with_columns(pl.Series("date", dates))
+        a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+        lengths = a._compute_high_lengths(messy["date"], "1mo")
+>       assert len(lengths) == messy.height, (
+            f"NaT dropna desynced lengths ({len(lengths)}) from n_low ({messy.height})"
+        )
+E       AssertionError: NaT dropna desynced lengths (41) from n_low (42)
+E       assert 41 == 42
+E        +  where 41 = len([6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
+E        +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 null       \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+
+tests/test_basic.py:1041: AssertionError
+_______ test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected ________
+
+    def test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected():
+        """C4: PepsiCo quarterly → 1q is a legitimate 1:1 expansion, not a failed fiscal inference.
+    
+        `_prepare_data` raises whenever every computed length is 1, so same-frequency
+        requests (including fiscal Sep-start quarters) are rejected as 'did not expand'.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+        a = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
+>       out = a.fit_transform(q, datetime_col="date", target_col="value")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_basic.py:1056: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x705d4a09f170>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value', extrapolate = None
+with_uncertainty = False, confidence_level = 0.9, return_dataframe = True
+include_dates = True
+
+    def fit_transform(
+        self,
+        df: pl.DataFrame | pl.LazyFrame | Any,
+        datetime_col: str = "date",
+        target_col: str = "y",
+        extrapolate: Literal["nan", "hold", "linear", "drop"] | None = None,
+        with_uncertainty: bool = False,
+        confidence_level: float = 0.90,
+        return_dataframe: bool = True,
+        include_dates: bool = True,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        """Fit and return the disaggregated high-frequency series.
+    
+        Parameters
+        ----------
+        df : DataFrame-like
+            Low-frequency data with datetime and target column.
+        datetime_col : str
+            Name of datetime column.
+        target_col : str
+            Name of value column to disaggregate.
+        extrapolate : {"nan", "hold", "linear", "drop"} or None
+            Policy for high-freq periods whose low-freq anchor was NaN (missing/unreported)
+            or beyond last valid anchor. Default (None) uses the instance setting (now "nan").
+            - "nan": leave NaN (honest for missing inputs)
+            - "hold": fill with last valid observed value (for NaN-input blocks or end)
+            - "linear": linear extend from last slope
+            - "drop": truncate output to drop periods originating from NaN low-freq inputs (shortens)
+        return_dataframe : bool, default True
+            If True, return a Polars DataFrame. If False, return exactly the prior
+            (pre-1.10) behavior: DataFrame containing only the value column(s)
+            (y_disaggregated +/- bands), without dates. Back-compat escape hatch.
+        include_dates : bool, default True
+            When return_dataframe=True, prepend a pl.Date column named "date" containing
+            the expanded high-frequency dates (same as disaggregate_columns(..., include_dates=True)).
+            Dates are generated via expand_high_freq_dates using the aligner's week_start etc.
+            Ignored when return_dataframe=False.
+    
+        Returns
+        -------
+        pl.DataFrame (or LazyFrame)
+            By default (return_dataframe=True): a DataFrame with "date" (if include_dates)
+            prepended and "y_disaggregated" (optionally + y_std/lower/upper when with_uncertainty).
+            When return_dataframe=False: exactly the prior behavior (DataFrame with value columns only, no date).
+        """
+        # Support lazy: collect for heavy ops
+        is_lazy = isinstance(df, pl.LazyFrame)
+        if is_lazy:
+            df = df.collect()
+    
+        # xarray support
+        if xr is not None and isinstance(df, xr.DataArray):
+            # Convert to polars for processing; handle unnamed DataArray defensively
+            try:
+                if df.name is None:
+                    df = df.rename("y")
+                pdf = df.to_dataframe().reset_index()
+                df = pl.from_pandas(pdf)
+            except Exception:
+                try:
+                    df = pl.from_pandas(df.to_pandas())
+                except Exception:
+                    df = pl.from_pandas(pd.DataFrame({"t": range(len(df)), "y": np.asarray(df)}))
+            datetime_col = df.columns[0]  # assume first is time
+    
+        # Capture low-frequency dates (supports polars/pandas inputs) for optional attachment.
+        # Done before fit() which normalizes further for pandas paths.
+        low_dates = None
+        try:
+            if hasattr(df, "columns") and datetime_col in df.columns:
+                col = df[datetime_col]
+                if isinstance(col, pl.Series):
+                    low_dates = col.clone()
+                elif pd is not None and isinstance(df, pd.DataFrame):
+                    low_dates = pl.from_pandas(pd.Series(col).reset_index(drop=True))
+                else:
+                    low_dates = pl.Series(list(col))
+            elif (pd is not None and isinstance(df, pd.DataFrame) and df.index.name == datetime_col) or (hasattr(df, "index") and isinstance(df.index, pd.DatetimeIndex)):
+                # pandas with dt index as date
+                low_dates = pl.from_pandas(df.index.to_series().reset_index(drop=True))
+        except Exception:
+            low_dates = None
+    
+        # allow per-call override without mutating instance permanently
+        orig_extrap = self.extrapolate
+        if extrapolate is not None:
+            self.extrapolate = extrapolate
+    
+        try:
+>           self.fit(df, datetime_col, target_col)
+
+src/aggdisagg/core.py:1128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x705d4a09f170>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value'
+
+    def fit(self, df: Any, datetime_col: str = "date", target_col: str = "y") -> TemporalAligner:
+        # Validate method early (before data checks) so bad method raises ValueError even on incomplete df
+        allowed_methods = ("uniform", "linear", "denton", "denton-cholette", "chow-lin", "chow-lin-opt", "chowlin", "litterman", "litterman-opt", "fernandez")
+        if self.method not in allowed_methods:
+            raise ValueError(f"Unknown method: {self.method}")
+        # Support pandas DatetimeIndex (wide or series)
+        if pd is not None and isinstance(df, pd.DataFrame):
+            if isinstance(df.index, pd.DatetimeIndex):
+                pdf = df.reset_index()
+                datetime_col = pdf.columns[0]
+                if target_col not in pdf.columns and len(pdf.columns) > 1:
+                    target_col = pdf.columns[1]  # auto detect first data col
+                df = pl.from_pandas(pdf)
+            else:
+                if target_col not in df.columns:
+                    if len(df.columns) > 0:
+                        target_col = df.columns[0]
+                    else:
+                        raise KeyError(f"target_col '{target_col}' not found")  # pragma: no cover
+                df = pl.from_pandas(df)
+    
+        if pd is not None and isinstance(df, pd.Series):
+            # pandas Series (DTI or not) - support for itype pandas_series in tests and general use
+            pdf = df.reset_index()
+            if len(pdf.columns) >= 1:
+                datetime_col = pdf.columns[0]
+            if len(pdf.columns) >= 2:
+                target_col = pdf.columns[1]
+            else:
+                # series with no index name, values are the target
+                target_col = "y" if "y" in pdf.columns else pdf.columns[0]
+            df = pl.from_pandas(pdf)
+    
+        if datetime_col not in df.columns:
+            raise KeyError(f"datetime_col '{datetime_col}' not found in df")
+>       y_low, X_high, _n_high = self._prepare_data(df, datetime_col, target_col)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/aggdisagg/core.py:774: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <aggdisagg.core.TemporalAligner object at 0x705d4a09f170>
+df = shape: (39, 2)
+┌────────────┬───────────┐
+│ date       ┆ value     │
+│ ---        ┆ ---       │
+│ date       ┆ f64    ...2.2726e10 │
+│ 2025-09-01 ┆ 2.3937e10 │
+│ 2025-12-01 ┆ 2.9343e10 │
+│ 2026-03-01 ┆ 1.9443e10 │
+└────────────┴───────────┘
+datetime_col = 'date', target_col = 'value'
+
+    def _prepare_data(
+        self, df: pl.DataFrame, datetime_col: str = "date", target_col: str = "y"
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Extract low y, build high-freq X (if indicators), compute sizes."""
+        self._datetime_col = datetime_col
+        self._target_col = target_col
+    
+        y_low = df[target_col].to_numpy().astype(float)
+        n_low = len(y_low)
+        self._n_low = n_low
+    
+        if n_low == 0:
+            # empty input: set trivial state, return empty high
+            self._n_high = 0
+            self._high_lengths = np.array([], dtype=int)
+            self._C = np.zeros((0, 0), dtype=float)
+            self._X_high = np.zeros((0, 1), dtype=float)
+            self._low_y = y_low
+            self._y_high = np.array([], dtype=float)
+            return y_low, self._X_high, 0
+    
+        # Use dates when available to pick correct multiplier (e.g. Q->M is 3 not 12)
+        date_series = df[datetime_col] if datetime_col in df.columns else None
+        ws_for_compute = getattr(self, "week_start", None)
+        lengths = self._compute_high_lengths(date_series, self.target_freq, week_start=ws_for_compute)
+        self._high_lengths = np.asarray(lengths, dtype=int) if lengths else None
+        n_high = int(np.sum(self._high_lengths)) if self._high_lengths is not None and len(self._high_lengths) > 0 else (n_low * self._infer_ratio(date_series, self.target_freq))
+        self._n_high = n_high
+        if n_high == n_low and n_low > 0:
+            if self._high_lengths is not None and set(self._high_lengths) == {1}:
+>               raise ValueError(
+                    f"Disaggregation did not expand the series (output length {n_high} == input {n_low}). "
+                    "The low-frequency dates could not be expanded calendar-correctly to the target frequency. "
+                    "Use standard calendar-aligned dates or the source_freq=... parameter for explicit control."
+                )
+E               ValueError: Disaggregation did not expand the series (output length 39 == input 39). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
+
+src/aggdisagg/core.py:715: ValueError
+_ test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series __
+
+    def test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series():
+        """C5: constructor n_bootstrap must populate std after a no-arg follow-up call.
+    
+        `fit_transform` without with_uncertainty=True leaves `_std_errors` None, and
+        `predict_with_uncertainty()` does not consult `self.n_bootstrap`, so the
+        fallback is an all-zero std array.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "bg_foods_capex_quarterly.csv"), try_parse_dates=True)
+        a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", n_bootstrap=20)
+        high = a.fit_transform(q, datetime_col="date", target_col="value")
+        _mean, std = a.predict_with_uncertainty()
+        assert len(std) == high.height
+>       assert np.any(np.asarray(std) > 0), "predict_with_uncertainty() returned all-zero std"
+E       AssertionError: predict_with_uncertainty() returned all-zero std
+E       assert np.False_
+E        +  where np.False_ = <function any at 0x705d5c962b30>(array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]) > 0)
+E        +    where <function any at 0x705d5c962b30> = np.any
+E        +    and   array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]) = <built-in function asarray>(array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]))
+E        +      where <built-in function asarray> = np.asarray
+
+tests/test_basic.py:1077: AssertionError
+________ test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly _________
+
+    def test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly():
+        """C8: source_freq is stored and named in the 1:1 error, but never read.
+    
+        Explicit source_freq='Y' on Kraft quarterly targeting monthly must force
+        12 children per observation (the advertised escape hatch), not silently
+        keep the inferred quarterly 3-month expansion.
+        """
+        q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+        a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
+        out = a.fit_transform(q, datetime_col="date", target_col="value")
+>       assert out.height == q.height * 12, (
+            f"source_freq='Y' was ignored; height {out.height} != {q.height * 12}"
+        )
+E       AssertionError: source_freq='Y' was ignored; height 126 != 504
+E       assert 126 == (42 * 12)
+E        +  where 126 = shape: (126, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 y_disaggregated \u2502\n\u2502 ---        \u2506 ---             \u2502\n\u2502 date       \u2506 f64             \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 2.3747e9        \u2502\n\u2502 2016-02-01 \u2506 2.3747e9        \u2502\n\u2502 2016-03-01 \u2506 2.3747e9        \u2502\n\u2502 2016-04-01 \u2506 2.1900e9        \u2502\n\u2502 2016-05-01 \u2506 2.1900e9        \u2502\n\u2502 \u2026          \u2506 \u2026               \u2502\n\u2502 2026-02-01 \u2506 2.1180e9        \u2502\n\u2502 2026-03-01 \u2506 2.1180e9        \u2502\n\u2502 2026-04-01 \u2506 2.0157e9        \u2502\n\u2502 2026-05-01 \u2506 2.0157e9        \u2502\n\u2502 2026-06-01 \u2506 2.0157e9        \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+E        +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 2016-04-01 \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+
+tests/test_basic.py:1090: AssertionError
+_________ test_c10_denton_p_uses_variable_high_lengths_on_real_monthly _________
+
+    def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
+        """C10: Denton-Cholette preliminary p must use calendar `_high_lengths`.
+    
+        Kraft monthly Jan-Mar 2016 is a leap-year window (31/29/31). `_apply_denton`
+        still builds p with uniform m = n_high // n_low (=30) and y_low/m block
+        means, so knots sit off the true month boundaries.
+        """
+        from unittest.mock import patch
+    
+        raw = pl.read_csv(
+            os.path.join(DATA_DIR, "Kraft_Heinz_Revenue_monthly_sum_disagg.csv"),
+            try_parse_dates=True,
+        )
+        monthly = raw.head(3).rename({raw.columns[0]: "date", raw.columns[1]: "value"})
+        captured = []
+        orig_interp = np.interp
+    
+        def _spy_interp(x, xp, fp, *args, **kwargs):
+            captured.append((np.asarray(xp, dtype=float).copy(), np.asarray(fp, dtype=float).copy()))
+            return orig_interp(x, xp, fp, *args, **kwargs)
+    
+        a = TemporalAligner(method="denton-cholette", target_freq="1d", agg="sum")
+        with patch("aggdisagg.core.np.interp", side_effect=_spy_interp):
+            a.fit_transform(monthly, datetime_col="date", target_col="value")
+        lengths = np.asarray(a._high_lengths, dtype=float)
+        assert list(lengths.astype(int)) == [31, 29, 31]
+        y_low = np.asarray(a._low_y, dtype=float)
+        starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+        calendar_pos = starts + 0.2 * lengths
+        calendar_means = y_low / lengths
+        assert captured, "Denton-Cholette never built a preliminary p via np.interp"
+        xp, fp = captured[0]
+>       assert np.allclose(xp, calendar_pos) and np.allclose(fp, calendar_means), (
+            "Denton-Cholette preliminary p ignores variable _high_lengths: "
+            f"knots={xp} means={fp} vs calendar knots={calendar_pos} means={calendar_means}"
+        )
+E       AssertionError: Denton-Cholette preliminary p ignores variable _high_lengths: knots=[ 6. 36. 66.] means=[80711530.17344667 79544549.21002834 77210587.28319167] vs calendar knots=[ 6.2 36.8 66.2] means=[78107932.42591614 82287464.70002931 74719923.17728226]
+E       assert (False)
+E        +  where False = <function allclose at 0x705d5c96b4f0>(array([ 6., 36., 66.]), array([ 6.2, 36.8, 66.2]))
+E        +    where <function allclose at 0x705d5c96b4f0> = np.allclose
+
+tests/test_basic.py:1127: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_basic.py::test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low - AssertionError: NaT dropna desynced lengths (41) from n_low (42)
+assert 41 == 42
+ +  where 41 = len([6, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
+ +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 null       \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+FAILED tests/test_basic.py::test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected - ValueError: Disaggregation did not expand the series (output length 39 == input 39). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
+FAILED tests/test_basic.py::test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series - AssertionError: predict_with_uncertainty() returned all-zero std
+assert np.False_
+ +  where np.False_ = <function any at 0x705d5c962b30>(array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]) > 0)
+ +    where <function any at 0x705d5c962b30> = np.any
+ +    and   array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]) = <built-in function asarray>(array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,\n       0., 0.]))
+ +      where <built-in function asarray> = np.asarray
+FAILED tests/test_basic.py::test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly - AssertionError: source_freq='Y' was ignored; height 126 != 504
+assert 126 == (42 * 12)
+ +  where 126 = shape: (126, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 y_disaggregated \u2502\n\u2502 ---        \u2506 ---             \u2502\n\u2502 date       \u2506 f64             \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 2.3747e9        \u2502\n\u2502 2016-02-01 \u2506 2.3747e9        \u2502\n\u2502 2016-03-01 \u2506 2.3747e9        \u2502\n\u2502 2016-04-01 \u2506 2.1900e9        \u2502\n\u2502 2016-05-01 \u2506 2.1900e9        \u2502\n\u2502 \u2026          \u2506 \u2026               \u2502\n\u2502 2026-02-01 \u2506 2.1180e9        \u2502\n\u2502 2026-03-01 \u2506 2.1180e9        \u2502\n\u2502 2026-04-01 \u2506 2.0157e9        \u2502\n\u2502 2026-05-01 \u2506 2.0157e9        \u2502\n\u2502 2026-06-01 \u2506 2.0157e9        \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+ +  and   42 = shape: (42, 2)\n\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502 date       \u2506 value      \u2502\n\u2502 ---        \u2506 ---        \u2502\n\u2502 date       \u2506 i64        \u2502\n\u255e\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u256a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2561\n\u2502 2016-01-01 \u2506 7124000000 \u2502\n\u2502 2016-04-01 \u2506 6570000000 \u2502\n\u2502 2016-07-01 \u2506 6793000000 \u2502\n\u2502 2016-10-01 \u2506 6267000000 \u2502\n\u2502 2017-01-01 \u2506 6670000000 \u2502\n\u2502 \u2026          \u2506 \u2026          \u2502\n\u2502 2025-04-01 \u2506 5999000000 \u2502\n\u2502 2025-07-01 \u2506 6352000000 \u2502\n\u2502 2025-10-01 \u2506 6237000000 \u2502\n\u2502 2026-01-01 \u2506 6354000000 \u2502\n\u2502 2026-04-01 \u2506 6047000000 \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518.height
+FAILED tests/test_basic.py::test_c10_denton_p_uses_variable_high_lengths_on_real_monthly - AssertionError: Denton-Cholette preliminary p ignores variable _high_lengths: knots=[ 6. 36. 66.] means=[80711530.17344667 79544549.21002834 77210587.28319167] vs calendar knots=[ 6.2 36.8 66.2] means=[78107932.42591614 82287464.70002931 74719923.17728226]
+assert (False)
+ +  where False = <function allclose at 0x705d5c96b4f0>(array([ 6., 36., 66.]), array([ 6.2, 36.8, 66.2]))
+ +    where <function allclose at 0x705d5c96b4f0> = np.allclose
+============================== 5 failed in 0.69s ===============================
