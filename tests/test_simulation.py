@@ -8892,3 +8892,130 @@ if __name__ == "__main__":
     test_messy_incomplete_data_batch_48()
     test_messy_incomplete_data_batch_49()
     print("All batch tests completed successfully.")
+
+
+def test_category_81_90_freq_and_date_handling_scenarios():
+    """Full category 81-90 from docs/test_plan_100_scenarios.md.
+
+    Category 81-90: Freq + date handling (1mo, 1q, daily-ish;
+    test expand_high_freq_dates). Runs all ten scenarios in this category
+    (not only the C3/C4/C8/C10 regressions) so related calendar/fiscal
+    edge cases the same bugs might affect are also exercised.
+
+    Assertions are tolerance-based (pytest.approx / np.isclose / explicit
+    epsilon) against values computed at test time or via the aggregation
+    invariant C @ y_high ≈ y_low. No hardcoded expected numeric outputs.
+    """
+    import calendar
+    import os
+
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    eps = 1e-6
+    failures = []
+
+    def check_constraint(aligner, y_low, label):
+        if aligner._C is None or aligner._y_high is None:
+            return
+        recovered = aligner._C @ aligner._y_high
+        y = np.asarray(y_low, dtype=float)
+        finite = np.isfinite(recovered) & np.isfinite(y)
+        if not np.any(finite):
+            return
+        scale = max(float(np.nanmax(np.abs(y))), 1.0)
+        if not np.allclose(recovered[finite], y[finite], rtol=eps, atol=eps * scale):
+            err = float(np.nanmax(np.abs(recovered[finite] - y[finite])))
+            failures.append(f"{label}: constraint maxerr={err}")
+
+    # 81: annual → monthly + expand_high_freq_dates
+    years = [date(2018 + i, 1, 1) for i in range(4)]
+    y81 = np.array([1200.0, 1320.0, 1080.0, 1440.0])
+    df81 = pl.DataFrame({"date": years, "y": y81})
+    a81 = TemporalAligner(method="uniform", target_freq="1mo", agg="sum")
+    h81 = a81.fit_transform(df81, datetime_col="date", target_col="y")
+    ratio81 = int(np.sum(a81._high_lengths) / len(y81)) if a81._high_lengths is not None else 12
+    assert len(h81) == pytest.approx(len(y81) * ratio81, abs=0)
+    check_constraint(a81, y81, "81 annual->1mo")
+    exp81 = a81.expand_high_freq_dates(df81["date"])
+    assert len(exp81) == pytest.approx(len(h81), abs=0)
+    assert exp81[1] > exp81[0]
+
+    # 82: annual → quarterly
+    a82 = TemporalAligner(method="linear", target_freq="1q", agg="sum")
+    h82 = a82.fit_transform(df81, datetime_col="date", target_col="y")
+    assert len(h82) == pytest.approx(len(y81) * 4, abs=0)
+    check_constraint(a82, y81, "82 annual->1q")
+
+    # 83: calendar quarterly → monthly
+    qdates = [date(2020, 1, 1), date(2020, 4, 1), date(2020, 7, 1), date(2020, 10, 1)]
+    y83 = np.array([300.0, 330.0, 360.0, 390.0])
+    df83 = pl.DataFrame({"date": qdates, "y": y83})
+    a83 = TemporalAligner(method="denton", target_freq="1mo", agg="sum")
+    h83 = a83.fit_transform(df83, datetime_col="date", target_col="y")
+    assert len(h83) == pytest.approx(len(y83) * 3, abs=0)
+    check_constraint(a83, y83, "83 Q->1mo")
+
+    # 84: quarterly → 1q identity (C4 shape)
+    a84 = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
+    h84 = a84.fit_transform(df83, datetime_col="date", target_col="y")
+    y84h = h84["y_disaggregated"].to_numpy()
+    assert y84h == pytest.approx(y83, abs=eps, rel=1e-9)
+    check_constraint(a84, y83, "84 Q->1q identity")
+
+    # 85: monthly → daily leap window (C10 shape)
+    mdates = [date(2016, 1, 1), date(2016, 2, 1), date(2016, 3, 1)]
+    y85 = np.array([310.0, 290.0, 310.0])
+    df85 = pl.DataFrame({"date": mdates, "y": y85})
+    a85 = TemporalAligner(method="denton-cholette", target_freq="1d", agg="sum")
+    h85 = a85.fit_transform(df85, datetime_col="date", target_col="y")
+    expected_days = np.array([calendar.monthrange(2016, m)[1] for m in (1, 2, 3)], dtype=float)
+    assert len(h85) == pytest.approx(float(np.sum(expected_days)), abs=0)
+    assert np.allclose(np.asarray(a85._high_lengths, dtype=float), expected_days, atol=0.0)
+    check_constraint(a85, y85, "85 M->D leap")
+
+    # 86: NaT in real quarterly dates (C3 shape)
+    kraft = pl.read_csv(os.path.join(data_dir, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    dates86 = kraft["date"].to_list()
+    dates86[1] = None
+    messy = kraft.with_columns(pl.Series("date", dates86))
+    a86 = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    lens86 = a86._compute_high_lengths(messy["date"], "1mo")
+    assert len(lens86) == pytest.approx(messy.height, abs=0)
+    a86.fit_transform(messy, datetime_col="date", target_col="value")
+    y86 = messy["value"].to_numpy().astype(float)
+    check_constraint(a86, y86, "86 NaT quarterly")
+
+    # 87: source_freq escape hatch (C8 shape)
+    a87 = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
+    h87 = a87.fit_transform(kraft, datetime_col="date", target_col="value")
+    y87 = kraft["value"].to_numpy().astype(float)
+    assert len(h87) == pytest.approx(kraft.height * 12, abs=0)
+    check_constraint(a87, y87, "87 source_freq Y")
+
+    # 88: fiscal Sep-start quarterly → monthly (PepsiCo)
+    pep = pl.read_csv(os.path.join(data_dir, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+    a88 = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    h88 = a88.fit_transform(pep, datetime_col="date", target_col="value")
+    y88 = pep["value"].to_numpy().astype(float)
+    assert len(h88) == pytest.approx(pep.height * 3, abs=0)
+    check_constraint(a88, y88, "88 fiscal Q->M")
+
+    # 89: expand_high_freq_dates daily-ish from monthly is monotonic and length-matched
+    a89 = TemporalAligner(method="uniform", target_freq="1d", agg="sum")
+    h89 = a89.fit_transform(df85, datetime_col="date", target_col="y")
+    exp89 = list(a89.expand_high_freq_dates(df85["date"]))
+    assert len(exp89) == pytest.approx(len(h89), abs=0)
+    assert all(exp89[i] <= exp89[i + 1] for i in range(len(exp89) - 1))
+    check_constraint(a89, y85, "89 expand daily")
+
+    # 90: weekly labels → daily (7 children / week)
+    wdates = [date(2020, 1, 6), date(2020, 1, 13), date(2020, 1, 20)]
+    y90 = np.array([70.0, 77.0, 84.0])
+    df90 = pl.DataFrame({"date": wdates, "y": y90})
+    a90 = TemporalAligner(method="uniform", target_freq="1d", agg="sum")
+    h90 = a90.fit_transform(df90, datetime_col="date", target_col="y")
+    assert len(h90) == pytest.approx(len(y90) * 7, abs=0)
+    recovered90 = h90["y_disaggregated"].to_numpy().reshape(len(y90), 7).sum(axis=1)
+    assert recovered90 == pytest.approx(y90, abs=eps, rel=1e-9)
+    check_constraint(a90, y90, "90 W->D")
+
+    assert not failures, "category 81-90 failures: " + "; ".join(failures)

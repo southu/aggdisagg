@@ -1,0 +1,21 @@
+Category 81-90: Freq + date handling
+Source: docs/test_plan_100_scenarios.md
+  81-90: Freq + date handling (1mo, 1q, daily-ish; test expand_high_freq_dates)
+Also includes promoted C3/C4/C8/C10 regressions (this category) and C5 (91-95 Uncertainty & bootstrap).
+Captured: 2026-08-15T18:12:23Z
+Command: pytest of category 81-90 scenarios plus related regression tests
+========================================================================
+
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+Fugue tests will be initialized with options:
+rootdir: /opt/ratchet/runs/aggdisagg-regression-tests-20260815-180535/builder/repo
+configfile: pyproject.toml
+plugins: cov-7.1.0, fugue-0.9.7
+collected 13 items
+
+tests/test_simulation.py .                                               [  7%]
+tests/test_basic.py ...........                                          [ 92%]
+tests/test_simulation.py .                                               [100%]
+
+============================== 13 passed in 0.60s ==============================

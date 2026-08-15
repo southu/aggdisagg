@@ -1021,15 +1021,29 @@ def test_issue2b_bg_within_r():
 
 
 # ------------------------------------------------------------------
-# Confirmed-bug reproductions (real CSV fixtures; expected RED until fixed)
-# See ROOT_CAUSE_ANALYSIS.md candidates C3, C4, C5, C8, C10.
+# Permanent regression tests for confirmed C3/C4/C5/C8/C10 bugs.
+# Primary category: 81-90 Freq + date handling (docs/test_plan_100_scenarios.md).
+# C5 maps to 91-95 Uncertainty & bootstrap in that same plan.
 # ------------------------------------------------------------------
 
-def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
-    """C3: a NaT in real Kraft quarterly dates must not dropna() the lengths vector.
+def _constraint_holds(aligner, y_low, rtol=1e-6, atol_scale=1e-6):
+    """Aggregation invariant: C @ y_high ≈ y_low for finite entries."""
+    if aligner._C is None or aligner._y_high is None:
+        return True
+    recovered = aligner._C @ aligner._y_high
+    y = np.asarray(y_low, dtype=float)
+    finite = np.isfinite(recovered) & np.isfinite(y)
+    if not np.any(finite):
+        return True
+    scale = max(float(np.nanmax(np.abs(y))), 1.0)
+    return np.allclose(recovered[finite], y[finite], rtol=rtol, atol=atol_scale * scale)
 
-    `_compute_high_lengths` parses with errors='coerce' then dropna(), so
-    len(lengths) < n_low and `_build_c_matrix` raises
+
+def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
+    """C3 / category 81-90 (Freq + date handling): NaT must not dropna() lengths.
+
+    `_compute_high_lengths` used to parse with errors='coerce' then dropna(), so
+    len(lengths) < n_low and `_build_c_matrix` raised
     'lengths length must match n_low'.
     """
     q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
@@ -1038,67 +1052,76 @@ def test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low():
     messy = q.with_columns(pl.Series("date", dates))
     a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
     lengths = a._compute_high_lengths(messy["date"], "1mo")
-    assert len(lengths) == messy.height, (
+    assert len(lengths) == pytest.approx(messy.height, abs=0), (
         f"NaT dropna desynced lengths ({len(lengths)}) from n_low ({messy.height})"
     )
     out = a.fit_transform(messy, datetime_col="date", target_col="value")
     assert out.height > 0
+    y_low = messy["value"].to_numpy().astype(float)
+    assert _constraint_holds(a, y_low)
 
 
 def test_c4_same_frequency_on_real_fiscal_quarterly_is_not_rejected():
-    """C4: PepsiCo quarterly → 1q is a legitimate 1:1 expansion, not a failed fiscal inference.
+    """C4 / category 81-90 (Freq + date handling): Q→1q is a legitimate 1:1.
 
-    `_prepare_data` raises whenever every computed length is 1, so same-frequency
-    requests (including fiscal Sep-start quarters) are rejected as 'did not expand'.
+    `_prepare_data` used to raise whenever every computed length is 1, so
+    same-frequency requests (including fiscal Sep-start quarters) were rejected.
     """
     q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
     a = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
     out = a.fit_transform(q, datetime_col="date", target_col="value")
-    assert out.height == q.height
-    assert np.allclose(
-        out["y_disaggregated"].to_numpy(),
-        q["value"].to_numpy().astype(float),
-        atol=1e-6,
-    )
+    y_high = out["y_disaggregated"].to_numpy()
+    y_low = q["value"].to_numpy().astype(float)
+    assert out.height == pytest.approx(q.height, abs=0)
+    assert y_high == pytest.approx(y_low, abs=1e-6, rel=1e-9)
+    assert _constraint_holds(a, y_low)
 
 
 def test_c5_predict_with_uncertainty_nonzero_after_fit_transform_on_real_series():
-    """C5: constructor n_bootstrap must populate std after a no-arg follow-up call.
+    """C5 / category 91-95 (Uncertainty & bootstrap): constructor n_bootstrap.
 
-    `fit_transform` without with_uncertainty=True leaves `_std_errors` None, and
-    `predict_with_uncertainty()` does not consult `self.n_bootstrap`, so the
-    fallback is an all-zero std array.
+    `fit_transform` without with_uncertainty=True used to leave `_std_errors`
+    None, and `predict_with_uncertainty()` did not consult `self.n_bootstrap`.
     """
     q = pl.read_csv(os.path.join(DATA_DIR, "bg_foods_capex_quarterly.csv"), try_parse_dates=True)
     a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", n_bootstrap=20)
     high = a.fit_transform(q, datetime_col="date", target_col="value")
     _mean, std = a.predict_with_uncertainty()
-    assert len(std) == high.height
-    assert np.any(np.asarray(std) > 0), "predict_with_uncertainty() returned all-zero std"
+    std = np.asarray(std, dtype=float)
+    assert len(std) == pytest.approx(high.height, abs=0)
+    # non-degenerate: at least one std exceeds a small explicit epsilon
+    assert float(np.nanmax(std)) > 1e-12, "predict_with_uncertainty() returned all-zero std"
 
 
 def test_c8_source_freq_escape_hatch_is_applied_on_real_quarterly():
-    """C8: source_freq is stored and named in the 1:1 error, but never read.
+    """C8 / category 81-90 (Freq + date handling): source_freq must be applied.
 
     Explicit source_freq='Y' on Kraft quarterly targeting monthly must force
-    12 children per observation (the advertised escape hatch), not silently
-    keep the inferred quarterly 3-month expansion.
+    12 children per observation; block sums recover y_low.
     """
     q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
     a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
     out = a.fit_transform(q, datetime_col="date", target_col="value")
-    assert out.height == q.height * 12, (
-        f"source_freq='Y' was ignored; height {out.height} != {q.height * 12}"
+    y_high = out["y_disaggregated"].to_numpy()
+    y_low = q["value"].to_numpy().astype(float)
+    ratio = 12
+    assert out.height == pytest.approx(q.height * ratio, abs=0), (
+        f"source_freq='Y' was ignored; height {out.height} != {q.height * ratio}"
     )
+    blocks = y_high.reshape(len(y_low), ratio).sum(axis=1)
+    scale = max(float(np.max(np.abs(y_low))), 1.0)
+    assert np.allclose(blocks, y_low, rtol=1e-9, atol=1e-6 * scale)
+    assert _constraint_holds(a, y_low)
 
 
 def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
-    """C10: Denton-Cholette preliminary p must use calendar `_high_lengths`.
+    """C10 / category 81-90 (Freq + date handling): Denton p uses calendar lengths.
 
-    Kraft monthly Jan-Mar 2016 is a leap-year window (31/29/31). `_apply_denton`
-    still builds p with uniform m = n_high // n_low (=30) and y_low/m block
-    means, so knots sit off the true month boundaries.
+    Kraft monthly Jan-Mar 2016 is a leap-year window. `_apply_denton` must
+    build p from `_high_lengths` (not uniform m = n_high // n_low).
+    Knots and block means are computed at test time from those lengths.
     """
+    import calendar
     from unittest.mock import patch
 
     raw = pl.read_csv(
@@ -1117,7 +1140,12 @@ def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
     with patch("aggdisagg.core.np.interp", side_effect=_spy_interp):
         a.fit_transform(monthly, datetime_col="date", target_col="value")
     lengths = np.asarray(a._high_lengths, dtype=float)
-    assert list(lengths.astype(int)) == [31, 29, 31]
+    first = monthly["date"].to_list()[0]
+    expected_days = np.array(
+        [calendar.monthrange(first.year, first.month + i)[1] for i in range(3)],
+        dtype=float,
+    )
+    assert np.allclose(lengths, expected_days, atol=0.0, rtol=0.0)
     y_low = np.asarray(a._low_y, dtype=float)
     starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
     calendar_pos = starts + 0.2 * lengths
@@ -1128,5 +1156,106 @@ def test_c10_denton_p_uses_variable_high_lengths_on_real_monthly():
         "Denton-Cholette preliminary p ignores variable _high_lengths: "
         f"knots={xp} means={fp} vs calendar knots={calendar_pos} means={calendar_means}"
     )
+    assert _constraint_holds(a, y_low)
+
+
+def test_regression_cat_81_90_c3_nat_alignment_invariant():
+    """Promoted C3 regression — category 81-90 (Freq + date handling).
+
+    See docs/test_plan_100_scenarios.md category list (81-90: Freq + date
+    handling). A missing date keeps a lengths slot; C @ y_high ≈ y_low
+    within float tolerance on finite groups.
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    dates = q["date"].to_list()
+    dates[1] = None
+    messy = q.with_columns(pl.Series("date", dates))
+    a = TemporalAligner(method="denton-cholette", target_freq="1mo", agg="sum")
+    lengths = np.asarray(a._compute_high_lengths(messy["date"], "1mo"), dtype=float)
+    assert lengths.size == pytest.approx(messy.height, abs=0)
+    out = a.fit_transform(messy, datetime_col="date", target_col="value")
+    y_high = out["y_disaggregated"].to_numpy()
+    y_low = messy["value"].to_numpy().astype(float)
+    assert np.all(np.asarray(lengths) > 0)
+    assert y_high.size == pytest.approx(float(np.sum(lengths)), abs=0, rel=0)
+    assert _constraint_holds(a, y_low)
+
+
+def test_regression_cat_81_90_c4_same_freq_identity_invariant():
+    """Promoted C4 regression — category 81-90 (Freq + date handling).
+
+    Fiscal quarterly → target_freq='1q' is the identity map: y_high equals
+    y_low within an explicit epsilon (not a rejected 1:1 expansion).
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "pepsico_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="uniform", target_freq="1q", agg="sum")
+    out = a.fit_transform(q, datetime_col="date", target_col="value")
+    y_high = out["y_disaggregated"].to_numpy()
+    y_low = q["value"].to_numpy().astype(float)
+    assert np.isclose(y_high.size, y_low.size, atol=0.0)
+    assert np.allclose(y_high, y_low, rtol=1e-9, atol=1e-6)
+    assert _constraint_holds(a, y_low)
+
+
+def test_regression_cat_81_90_c8_source_freq_block_sum_invariant():
+    """Promoted C8 regression — category 81-90 (Freq + date handling).
+
+    source_freq='Y' must override label spacing. Each low observation expands
+    to 12 months whose sum recovers that observation (aggregation invariant).
+    """
+    q = pl.read_csv(os.path.join(DATA_DIR, "kraft_heinz_quarterly_revenue.csv"), try_parse_dates=True)
+    a = TemporalAligner(method="uniform", target_freq="1mo", agg="sum", source_freq="Y")
+    out = a.fit_transform(q, datetime_col="date", target_col="value")
+    y_high = out["y_disaggregated"].to_numpy()
+    y_low = q["value"].to_numpy().astype(float)
+    ratio = int(a._infer_ratio(q["date"], "1mo"))
+    assert ratio == pytest.approx(12, abs=0)
+    assert y_high.size == pytest.approx(y_low.size * ratio, abs=0)
+    recovered = y_high.reshape(y_low.size, ratio).sum(axis=1)
+    assert recovered == pytest.approx(y_low, rel=1e-9, abs=1e-6 * max(float(np.max(np.abs(y_low))), 1.0))
+    assert _constraint_holds(a, y_low)
+
+
+def test_regression_cat_81_90_c10_denton_calendar_constraint():
+    """Promoted C10 regression — category 81-90 (Freq + date handling).
+
+    Leap-year M→D window: calendar day counts computed at test time;
+    Denton-Cholette knots sit at start + 0.2 * length_i; C @ y_high ≈ y_low.
+    """
+    import calendar
+    from unittest.mock import patch
+
+    raw = pl.read_csv(
+        os.path.join(DATA_DIR, "Kraft_Heinz_Revenue_monthly_sum_disagg.csv"),
+        try_parse_dates=True,
+    )
+    monthly = raw.head(3).rename({raw.columns[0]: "date", raw.columns[1]: "value"})
+    captured = []
+    orig_interp = np.interp
+
+    def _spy_interp(x, xp, fp, *args, **kwargs):
+        captured.append((np.asarray(xp, dtype=float).copy(), np.asarray(fp, dtype=float).copy()))
+        return orig_interp(x, xp, fp, *args, **kwargs)
+
+    a = TemporalAligner(method="denton-cholette", target_freq="1d", agg="sum")
+    with patch("aggdisagg.core.np.interp", side_effect=_spy_interp):
+        out = a.fit_transform(monthly, datetime_col="date", target_col="value")
+    y_low = monthly["value"].to_numpy().astype(float)
+    first = monthly["date"].to_list()[0]
+    expected_days = np.array(
+        [calendar.monthrange(first.year, first.month + i)[1] for i in range(len(y_low))],
+        dtype=float,
+    )
+    lengths = np.asarray(a._high_lengths, dtype=float)
+    assert np.allclose(lengths, expected_days, atol=0.0)
+    starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+    calendar_pos = starts + 0.2 * lengths
+    calendar_means = y_low / lengths
+    assert captured, "Denton-Cholette never built a preliminary p via np.interp"
+    xp, fp = captured[0]
+    assert np.allclose(xp, calendar_pos, rtol=0.0, atol=1e-9)
+    assert np.allclose(fp, calendar_means, rtol=1e-12, atol=1e-9 * max(float(np.max(np.abs(y_low))), 1.0))
+    assert out.height == pytest.approx(float(np.sum(expected_days)), abs=0)
+    assert _constraint_holds(a, y_low)
 
 
