@@ -30,7 +30,9 @@ uv run pytest --cov=aggdisagg
 `pyproject.toml` `[tool.pytest.ini_options].addopts` already injects
 `-ra -q --cov=aggdisagg --cov-report=term-missing`. The capture also passed
 `-vv --tb=short` so every collected test name, skip reason, failure, warning,
-and the coverage table appear in `artifacts/pytest_output.log`.
+and the coverage table appear in `artifacts/pytest_output.log`. That file is
+the raw pytest stdout/stderr; the summary banner was not rewritten after
+capture.
 
 Collected: **122** items (`tests/test_basic.py` + `tests/test_simulation.py`).
 
@@ -43,14 +45,12 @@ Collected: **122** items (`tests/test_basic.py` + `tests/test_simulation.py`).
 | Skipped | **2** |
 | Errors | **0** |
 | Warnings | **71** |
-| Duration | 79.54s |
+| Duration | 78.65s |
 
-Final pytest line (banner padded from pytest's 7 `=` to 8 `=` on each
-side — seven leading `=` plus a space is a Git conflict marker, so the
-committed artifacts use 8 so `git diff --check` passes):
+Final pytest line (verbatim from `artifacts/pytest_output.log`):
 
 ```
-======== 61 failed, 59 passed, 2 skipped, 71 warnings in 79.54s (0:01:19) ========
+=========================== 61 failed, 59 passed, 2 skipped, 71 warnings in 78.65s (0:01:18) ===========================
 ```
 
 ### Coverage
