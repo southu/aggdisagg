@@ -1,0 +1,872 @@
+================================================================================
+COMMAND: uv run python artifacts/run_messy_loop_audit.py
+PATTERN: tests/run_messy_loop.py repeated-run design (each combo run 5 times)
+MATRIX: 3 datasets x 8 methods x 5 repeats = 120 runs
+DATASETS: Kraft Heinz (kraft_heinz_quarterly_revenue.csv),
+          PepsiCo (pepsico_quarterly_revenue.csv),
+          B&G Foods (bg_foods_capex_quarterly.csv)
+METHODS: uniform, linear, denton, denton-cholette, chow-lin, chow-lin-opt, litterman, fernandez
+CWD: /opt/ratchet/runs/aggdisagg-test-suite-audit-20260815-164524/builder/repo
+DATE: 2026-08-15T16:49:26Z
+================================================================================
+
+==============================================================================
+MESSY-LOOP AUDIT: repeated-run pattern on all CSV fixtures x methods
+Pattern source: tests/run_messy_loop.py (repeat until clean / multi-run)
+Repeats per dataset/method combination: 5
+Datasets: ['Kraft Heinz', 'PepsiCo', 'B&G Foods']
+Methods: ['uniform', 'linear', 'denton', 'denton-cholette', 'chow-lin', 'chow-lin-opt', 'litterman', 'fernandez']
+Constraint tols: rtol=1e-06, atol=0.0001
+Started: 2026-08-15 16:49:26
+==============================================================================
+
+##############################################################################
+# DATASET: Kraft Heinz  (tests/data/kraft_heinz_quarterly_revenue.csv)
+##############################################################################
+  rows=42  date_min=2016-01-01  date_max=2026-04-01
+  value range=[5.959e+09, 7.381e+09]
+
+--- Kraft Heinz / uniform  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='uniform' at 16:49:26 ===
+  elapsed=0.0084s  n_high=126  min=1.98633e+09  max=2.46033e+09  mean=2.16613e+09
+  constraint: abs_err=0  rel_err=0  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=3.3607%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='uniform' at 16:49:26 ===
+  elapsed=0.0056s  n_high=126  min=1.98633e+09  max=2.46033e+09  mean=2.16613e+09
+  constraint: abs_err=0  rel_err=0  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='uniform' at 16:49:26 ===
+  elapsed=0.0055s  n_high=126  min=1.98633e+09  max=2.46033e+09  mean=2.16613e+09
+  constraint: abs_err=0  rel_err=0  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='uniform' at 16:49:26 ===
+  elapsed=0.0054s  n_high=126  min=1.98633e+09  max=2.46033e+09  mean=2.16613e+09
+  constraint: abs_err=0  rel_err=0  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='uniform' at 16:49:26 ===
+  elapsed=0.0054s  n_high=126  min=1.98633e+09  max=2.46033e+09  mean=2.16613e+09
+  constraint: abs_err=0  rel_err=0  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / uniform  (5 repeats, mean 0.0061s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / linear  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='linear' at 16:49:26 ===
+  elapsed=0.0057s  n_high=126  min=1.9512e+09  max=2.50249e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=2.5270%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='linear' at 16:49:26 ===
+  elapsed=0.0054s  n_high=126  min=1.9512e+09  max=2.50249e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='linear' at 16:49:26 ===
+  elapsed=0.0053s  n_high=126  min=1.9512e+09  max=2.50249e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='linear' at 16:49:26 ===
+  elapsed=0.0054s  n_high=126  min=1.9512e+09  max=2.50249e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='linear' at 16:49:26 ===
+  elapsed=0.0053s  n_high=126  min=1.9512e+09  max=2.50249e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / linear  (5 repeats, mean 0.0054s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / denton  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='denton' at 16:49:26 ===
+  elapsed=0.0074s  n_high=126  min=1.89662e+09  max=2.51989e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=3.7395%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='denton' at 16:49:26 ===
+  elapsed=0.0067s  n_high=126  min=1.89662e+09  max=2.51989e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='denton' at 16:49:26 ===
+  elapsed=0.0065s  n_high=126  min=1.89662e+09  max=2.51989e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='denton' at 16:49:26 ===
+  elapsed=0.0065s  n_high=126  min=1.89662e+09  max=2.51989e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='denton' at 16:49:26 ===
+  elapsed=0.0066s  n_high=126  min=1.89662e+09  max=2.51989e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / denton  (5 repeats, mean 0.0067s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / denton-cholette  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='denton-cholette' at 16:49:26 ===
+  elapsed=0.0063s  n_high=126  min=1.93755e+09  max=2.51997e+09  mean=2.16613e+09
+  constraint: abs_err=9.53674e-07  rel_err=1.29207e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=1.7128%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='denton-cholette' at 16:49:26 ===
+  elapsed=0.0063s  n_high=126  min=1.93755e+09  max=2.51997e+09  mean=2.16613e+09
+  constraint: abs_err=9.53674e-07  rel_err=1.29207e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='denton-cholette' at 16:49:26 ===
+  elapsed=0.0064s  n_high=126  min=1.93755e+09  max=2.51997e+09  mean=2.16613e+09
+  constraint: abs_err=9.53674e-07  rel_err=1.29207e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='denton-cholette' at 16:49:26 ===
+  elapsed=0.0149s  n_high=126  min=1.93755e+09  max=2.51997e+09  mean=2.16613e+09
+  constraint: abs_err=9.53674e-07  rel_err=1.29207e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='denton-cholette' at 16:49:26 ===
+  elapsed=0.0065s  n_high=126  min=1.93755e+09  max=2.51997e+09  mean=2.16613e+09
+  constraint: abs_err=9.53674e-07  rel_err=1.29207e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / denton-cholette  (5 repeats, mean 0.0081s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / chow-lin  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='chow-lin' at 16:49:26 ===
+  elapsed=0.0088s  n_high=126  min=1.95201e+09  max=2.50118e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=1.7010%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='chow-lin' at 16:49:26 ===
+  elapsed=0.0088s  n_high=126  min=1.95201e+09  max=2.50118e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='chow-lin' at 16:49:26 ===
+  elapsed=0.0088s  n_high=126  min=1.95201e+09  max=2.50118e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='chow-lin' at 16:49:26 ===
+  elapsed=0.0088s  n_high=126  min=1.95201e+09  max=2.50118e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='chow-lin' at 16:49:26 ===
+  elapsed=0.0088s  n_high=126  min=1.95201e+09  max=2.50118e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / chow-lin  (5 repeats, mean 0.0088s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / chow-lin-opt  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='chow-lin-opt' at 16:49:26 ===
+  elapsed=0.0426s  n_high=126  min=1.98483e+09  max=2.46226e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=3.3011%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='chow-lin-opt' at 16:49:26 ===
+  elapsed=0.0423s  n_high=126  min=1.98483e+09  max=2.46226e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='chow-lin-opt' at 16:49:26 ===
+  elapsed=0.0392s  n_high=126  min=1.98483e+09  max=2.46226e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='chow-lin-opt' at 16:49:26 ===
+  elapsed=0.0416s  n_high=126  min=1.98483e+09  max=2.46226e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='chow-lin-opt' at 16:49:26 ===
+  elapsed=0.0343s  n_high=126  min=1.98483e+09  max=2.46226e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / chow-lin-opt  (5 repeats, mean 0.0400s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / litterman  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='litterman' at 16:49:26 ===
+  elapsed=0.0230s  n_high=126  min=1.95194e+09  max=2.50112e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=2.8871%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='litterman' at 16:49:26 ===
+  elapsed=0.0245s  n_high=126  min=1.95194e+09  max=2.50112e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='litterman' at 16:49:26 ===
+  elapsed=0.0241s  n_high=126  min=1.95194e+09  max=2.50112e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='litterman' at 16:49:26 ===
+  elapsed=0.0229s  n_high=126  min=1.95194e+09  max=2.50112e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='litterman' at 16:49:26 ===
+  elapsed=0.0231s  n_high=126  min=1.95194e+09  max=2.50112e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / litterman  (5 repeats, mean 0.0235s, warns=0)
+CLEAN RUN! No errors.
+
+--- Kraft Heinz / fernandez  (5 repeats) ---
+
+=== BATCH 1/5  dataset='Kraft Heinz' method='fernandez' at 16:49:26 ===
+  elapsed=0.0066s  n_high=126  min=1.94826e+09  max=2.5046e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  vs R-ref (row-aligned, n=126): max_pct_diff=0.0798%
+  run 1: OK
+
+=== BATCH 2/5  dataset='Kraft Heinz' method='fernandez' at 16:49:26 ===
+  elapsed=0.0066s  n_high=126  min=1.94826e+09  max=2.5046e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='Kraft Heinz' method='fernandez' at 16:49:26 ===
+  elapsed=0.0067s  n_high=126  min=1.94826e+09  max=2.5046e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='Kraft Heinz' method='fernandez' at 16:49:26 ===
+  elapsed=0.0143s  n_high=126  min=1.94826e+09  max=2.5046e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='Kraft Heinz' method='fernandez' at 16:49:26 ===
+  elapsed=0.0068s  n_high=126  min=1.94826e+09  max=2.5046e+09  mean=2.16613e+09
+  constraint: abs_err=1.90735e-06  rel_err=2.58413e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  Kraft Heinz / fernandez  (5 repeats, mean 0.0082s, warns=0)
+CLEAN RUN! No errors.
+
+##############################################################################
+# DATASET: PepsiCo  (tests/data/pepsico_quarterly_revenue.csv)
+##############################################################################
+  rows=39  date_min=2016-09-01  date_max=2026-03-01
+  value range=[1.2049e+10, 2.9343e+10]
+
+--- PepsiCo / uniform  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='uniform' at 16:49:26 ===
+  elapsed=0.0053s  n_high=117  min=4.01633e+09  max=9.781e+09  mean=6.52838e+09
+  constraint: abs_err=1.90735e-06  rel_err=6.50018e-17  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=14.4409%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='uniform' at 16:49:26 ===
+  elapsed=0.0053s  n_high=117  min=4.01633e+09  max=9.781e+09  mean=6.52838e+09
+  constraint: abs_err=1.90735e-06  rel_err=6.50018e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='uniform' at 16:49:26 ===
+  elapsed=0.0051s  n_high=117  min=4.01633e+09  max=9.781e+09  mean=6.52838e+09
+  constraint: abs_err=1.90735e-06  rel_err=6.50018e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='uniform' at 16:49:26 ===
+  elapsed=0.0051s  n_high=117  min=4.01633e+09  max=9.781e+09  mean=6.52838e+09
+  constraint: abs_err=1.90735e-06  rel_err=6.50018e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='uniform' at 16:49:26 ===
+  elapsed=0.0052s  n_high=117  min=4.01633e+09  max=9.781e+09  mean=6.52838e+09
+  constraint: abs_err=1.90735e-06  rel_err=6.50018e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / uniform  (5 repeats, mean 0.0052s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / linear  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='linear' at 16:49:26 ===
+  elapsed=0.0051s  n_high=117  min=3.73034e+09  max=1.03467e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=16.2741%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='linear' at 16:49:26 ===
+  elapsed=0.0084s  n_high=117  min=3.73034e+09  max=1.03467e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='linear' at 16:49:26 ===
+  elapsed=0.0055s  n_high=117  min=3.73034e+09  max=1.03467e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='linear' at 16:49:26 ===
+  elapsed=0.0053s  n_high=117  min=3.73034e+09  max=1.03467e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='linear' at 16:49:26 ===
+  elapsed=0.0051s  n_high=117  min=3.73034e+09  max=1.03467e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / linear  (5 repeats, mean 0.0059s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / denton  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='denton' at 16:49:27 ===
+  elapsed=0.0066s  n_high=117  min=3.32072e+09  max=1.03119e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=22.1238%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='denton' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.32072e+09  max=1.03119e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='denton' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.32072e+09  max=1.03119e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='denton' at 16:49:27 ===
+  elapsed=0.0065s  n_high=117  min=3.32072e+09  max=1.03119e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='denton' at 16:49:27 ===
+  elapsed=0.0082s  n_high=117  min=3.32072e+09  max=1.03119e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / denton  (5 repeats, mean 0.0068s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / denton-cholette  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0061s  n_high=117  min=3.6457e+09  max=1.02752e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=6.5043%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.6457e+09  max=1.02752e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0060s  n_high=117  min=3.6457e+09  max=1.02752e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0062s  n_high=117  min=3.6457e+09  max=1.02752e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0061s  n_high=117  min=3.6457e+09  max=1.02752e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / denton-cholette  (5 repeats, mean 0.0062s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / chow-lin  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0068s  n_high=117  min=3.75611e+09  max=1.01323e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=9.7269%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0068s  n_high=117  min=3.75611e+09  max=1.01323e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0067s  n_high=117  min=3.75611e+09  max=1.01323e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0067s  n_high=117  min=3.75611e+09  max=1.01323e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0067s  n_high=117  min=3.75611e+09  max=1.01323e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / chow-lin  (5 repeats, mean 0.0067s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / chow-lin-opt  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0403s  n_high=117  min=4.00101e+09  max=9.79769e+09  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=14.9401%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0317s  n_high=117  min=4.00101e+09  max=9.79769e+09  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0326s  n_high=117  min=4.00101e+09  max=9.79769e+09  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0324s  n_high=117  min=4.00101e+09  max=9.79769e+09  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0315s  n_high=117  min=4.00101e+09  max=9.79769e+09  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / chow-lin-opt  (5 repeats, mean 0.0337s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / litterman  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='litterman' at 16:49:27 ===
+  elapsed=0.0206s  n_high=117  min=3.73295e+09  max=1.01287e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=8.6672%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='litterman' at 16:49:27 ===
+  elapsed=0.0208s  n_high=117  min=3.73295e+09  max=1.01287e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='litterman' at 16:49:27 ===
+  elapsed=0.0273s  n_high=117  min=3.73295e+09  max=1.01287e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='litterman' at 16:49:27 ===
+  elapsed=0.0208s  n_high=117  min=3.73295e+09  max=1.01287e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='litterman' at 16:49:27 ===
+  elapsed=0.0209s  n_high=117  min=3.73295e+09  max=1.01287e+10  mean=6.52838e+09
+  constraint: abs_err=3.8147e-06  rel_err=1.30004e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / litterman  (5 repeats, mean 0.0221s, warns=0)
+CLEAN RUN! No errors.
+
+--- PepsiCo / fernandez  (5 repeats) ---
+
+=== BATCH 1/5  dataset='PepsiCo' method='fernandez' at 16:49:27 ===
+  elapsed=0.0064s  n_high=117  min=3.73381e+09  max=1.01318e+10  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  vs R-ref (row-aligned, n=117): max_pct_diff=0.0572%
+  run 1: OK
+
+=== BATCH 2/5  dataset='PepsiCo' method='fernandez' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.73381e+09  max=1.01318e+10  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='PepsiCo' method='fernandez' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.73381e+09  max=1.01318e+10  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='PepsiCo' method='fernandez' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.73381e+09  max=1.01318e+10  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='PepsiCo' method='fernandez' at 16:49:27 ===
+  elapsed=0.0063s  n_high=117  min=3.73381e+09  max=1.01318e+10  mean=6.52838e+09
+  constraint: abs_err=7.62939e-06  rel_err=2.60007e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  PepsiCo / fernandez  (5 repeats, mean 0.0063s, warns=0)
+CLEAN RUN! No errors.
+
+##############################################################################
+# DATASET: B&G Foods  (tests/data/bg_foods_capex_quarterly.csv)
+##############################################################################
+  rows=46  date_min=2015-01-01  date_max=2026-04-01
+  value range=[3.2e+09, 1.76e+10]
+
+--- B&G Foods / uniform  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='uniform' at 16:49:27 ===
+  elapsed=0.0059s  n_high=138  min=1.06667e+09  max=5.86667e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=51.1681%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='uniform' at 16:49:27 ===
+  elapsed=0.0074s  n_high=138  min=1.06667e+09  max=5.86667e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='uniform' at 16:49:27 ===
+  elapsed=0.0058s  n_high=138  min=1.06667e+09  max=5.86667e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='uniform' at 16:49:27 ===
+  elapsed=0.0057s  n_high=138  min=1.06667e+09  max=5.86667e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='uniform' at 16:49:27 ===
+  elapsed=0.0056s  n_high=138  min=1.06667e+09  max=5.86667e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / uniform  (5 repeats, mean 0.0061s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / linear  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='linear' at 16:49:27 ===
+  elapsed=0.0058s  n_high=138  min=9.7589e+08  max=6.64962e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=23.1916%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='linear' at 16:49:27 ===
+  elapsed=0.0058s  n_high=138  min=9.7589e+08  max=6.64962e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='linear' at 16:49:27 ===
+  elapsed=0.0058s  n_high=138  min=9.7589e+08  max=6.64962e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='linear' at 16:49:27 ===
+  elapsed=0.0058s  n_high=138  min=9.7589e+08  max=6.64962e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='linear' at 16:49:27 ===
+  elapsed=0.0057s  n_high=138  min=9.7589e+08  max=6.64962e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / linear  (5 repeats, mean 0.0057s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / denton  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='denton' at 16:49:27 ===
+  elapsed=0.0072s  n_high=138  min=7.33798e+08  max=6.30258e+09  mean=2.83846e+09
+  constraint: abs_err=9.53674e-07  rel_err=5.4186e-17  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=55.0914%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='denton' at 16:49:27 ===
+  elapsed=0.0070s  n_high=138  min=7.33798e+08  max=6.30258e+09  mean=2.83846e+09
+  constraint: abs_err=9.53674e-07  rel_err=5.4186e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='denton' at 16:49:27 ===
+  elapsed=0.0069s  n_high=138  min=7.33798e+08  max=6.30258e+09  mean=2.83846e+09
+  constraint: abs_err=9.53674e-07  rel_err=5.4186e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='denton' at 16:49:27 ===
+  elapsed=0.0069s  n_high=138  min=7.33798e+08  max=6.30258e+09  mean=2.83846e+09
+  constraint: abs_err=9.53674e-07  rel_err=5.4186e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='denton' at 16:49:27 ===
+  elapsed=0.0069s  n_high=138  min=7.33798e+08  max=6.30258e+09  mean=2.83846e+09
+  constraint: abs_err=9.53674e-07  rel_err=5.4186e-17  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / denton  (5 repeats, mean 0.0070s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / denton-cholette  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0069s  n_high=138  min=9.78602e+08  max=6.51476e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=26.7176%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0093s  n_high=138  min=9.78602e+08  max=6.51476e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0135s  n_high=138  min=9.78602e+08  max=6.51476e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0067s  n_high=138  min=9.78602e+08  max=6.51476e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='denton-cholette' at 16:49:27 ===
+  elapsed=0.0068s  n_high=138  min=9.78602e+08  max=6.51476e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / denton-cholette  (5 repeats, mean 0.0087s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / chow-lin  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0083s  n_high=138  min=1.01875e+09  max=6.18829e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=13.8991%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0077s  n_high=138  min=1.01875e+09  max=6.18829e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0077s  n_high=138  min=1.01875e+09  max=6.18829e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0078s  n_high=138  min=1.01875e+09  max=6.18829e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='chow-lin' at 16:49:27 ===
+  elapsed=0.0092s  n_high=138  min=1.01875e+09  max=6.18829e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / chow-lin  (5 repeats, mean 0.0081s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / chow-lin-opt  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0437s  n_high=138  min=1.0603e+09  max=5.88116e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=49.6807%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0412s  n_high=138  min=1.0603e+09  max=5.88116e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0434s  n_high=138  min=1.0603e+09  max=5.88116e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0475s  n_high=138  min=1.0603e+09  max=5.88116e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='chow-lin-opt' at 16:49:27 ===
+  elapsed=0.0606s  n_high=138  min=1.0603e+09  max=5.88116e+09  mean=2.83846e+09
+  constraint: abs_err=3.8147e-06  rel_err=2.16744e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / chow-lin-opt  (5 repeats, mean 0.0473s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / litterman  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='litterman' at 16:49:27 ===
+  elapsed=0.0305s  n_high=138  min=9.7097e+08  max=6.17066e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=28.0106%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='litterman' at 16:49:27 ===
+  elapsed=0.0273s  n_high=138  min=9.7097e+08  max=6.17066e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='litterman' at 16:49:27 ===
+  elapsed=0.0290s  n_high=138  min=9.7097e+08  max=6.17066e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='litterman' at 16:49:27 ===
+  elapsed=0.0323s  n_high=138  min=9.7097e+08  max=6.17066e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='litterman' at 16:49:27 ===
+  elapsed=0.0288s  n_high=138  min=9.7097e+08  max=6.17066e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / litterman  (5 repeats, mean 0.0296s, warns=0)
+CLEAN RUN! No errors.
+
+--- B&G Foods / fernandez  (5 repeats) ---
+
+=== BATCH 1/5  dataset='B&G Foods' method='fernandez' at 16:49:27 ===
+  elapsed=0.0074s  n_high=138  min=1.00538e+09  max=6.33227e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  vs R-ref (row-aligned, n=138): max_pct_diff=0.1139%
+  run 1: OK
+
+=== BATCH 2/5  dataset='B&G Foods' method='fernandez' at 16:49:28 ===
+  elapsed=0.0073s  n_high=138  min=1.00538e+09  max=6.33227e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 2: OK
+
+=== BATCH 3/5  dataset='B&G Foods' method='fernandez' at 16:49:28 ===
+  elapsed=0.0074s  n_high=138  min=1.00538e+09  max=6.33227e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 3: OK
+
+=== BATCH 4/5  dataset='B&G Foods' method='fernandez' at 16:49:28 ===
+  elapsed=0.0085s  n_high=138  min=1.00538e+09  max=6.33227e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 4: OK
+
+=== BATCH 5/5  dataset='B&G Foods' method='fernandez' at 16:49:28 ===
+  elapsed=0.0087s  n_high=138  min=1.00538e+09  max=6.33227e+09  mean=2.83846e+09
+  constraint: abs_err=1.90735e-06  rel_err=1.08372e-16  ok=True
+  determinism vs run 1: max_abs_diff=0
+  run 5: OK
+COMBO RESULT: CLEAN RUN  B&G Foods / fernandez  (5 repeats, mean 0.0078s, warns=0)
+CLEAN RUN! No errors.
+
+==============================================================================
+MESSY-LOOP AUDIT SUMMARY
+==============================================================================
+Datasets: 3
+Methods: 8
+Repeats per combination: 5
+Matrix size: 3 x 8 x 5 = 120 runs
+Clean combinations: 24/24
+Failed combinations: 0
+Warnings recorded: 0
+Finding lines: 0
+
+No failures found.
+Finished: 2026-08-15 16:49:28
+EXIT=0
+MESSY_LOOP_EXIT=0
