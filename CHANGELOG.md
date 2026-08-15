@@ -5,6 +5,11 @@ All notable changes to aggdisagg will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-08-15
+
+### Fixed
+- Investigated the known `sse3` crash (`RuntimeError: unknown feature flag: 'sse3'` on `import polars` / `from aggdisagg import TemporalAligner`). No code bug found; sse3 crash is environment-specific (Polars import-time CPU-feature check when CPUID is skipped or the installed wheel/runtime is mismatched). Not reproduced on an x86_64 host with SSE3 present; no library code or version change.
+
 ## [1.11.0] - 2026-07-09
 
 ### Fixed
