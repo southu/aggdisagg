@@ -1,11 +1,11 @@
 # aggdisagg test-suite audit
 
-**Date:** 2026-08-15  
-**Repo:** https://github.com/southu/aggdisagg  
-**Commit under test:** `efe6acc` (`docs: put unambiguous SSE3 (a) classification at the top`)  
-**Environment:** Linux, CPython 3.12.3, `uv 0.12.5`, pytest 9.1.1, pytest-cov 7.1.0  
-**Library version:** 1.11.0 (`pyproject.toml` / `src/aggdisagg/__init__.py`)  
-**`version.txt`:** not present in the repository; it was not created or modified.
+- **Date:** 2026-08-15
+- **Repo:** https://github.com/southu/aggdisagg
+- **Commit under test:** `efe6acc` (`docs: put unambiguous SSE3 (a) classification at the top`)
+- **Environment:** Linux, CPython 3.12.3, `uv 0.12.5`, pytest 9.1.1, pytest-cov 7.1.0
+- **Library version:** 1.11.0 (`pyproject.toml` / `src/aggdisagg/__init__.py`)
+- **`version.txt`:** not present in the repository; it was not created or modified.
 
 This is an audit-only report. Library behavior was not changed.
 
@@ -45,10 +45,12 @@ Collected: **122** items (`tests/test_basic.py` + `tests/test_simulation.py`).
 | Warnings | **71** |
 | Duration | 79.54s |
 
-Final pytest line:
+Final pytest line (banner padded from pytest's 7 `=` to 8 `=` on each
+side — seven leading `=` plus a space is a Git conflict marker, so the
+committed artifacts use 8 so `git diff --check` passes):
 
 ```
-======= 61 failed, 59 passed, 2 skipped, 71 warnings in 79.54s (0:01:19) =======
+======== 61 failed, 59 passed, 2 skipped, 71 warnings in 79.54s (0:01:19) ========
 ```
 
 ### Coverage

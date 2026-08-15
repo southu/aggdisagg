@@ -1709,5 +1709,5 @@ FAILED tests/test_simulation.py::test_messy_incomplete_data_batch_42 - ValueErro
 FAILED tests/test_simulation.py::test_messy_incomplete_data_batch_43 - ValueError: lengths length must match n_low
 FAILED tests/test_simulation.py::test_messy_incomplete_data_batch_46 - ValueError: Disaggregation did not expand the series (output length 4 == input 4). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
 FAILED tests/test_simulation.py::test_messy_incomplete_data_batch_47 - ValueError: Disaggregation did not expand the series (output length 4 == input 4). The low-frequency dates could not be expanded calendar-correctly to the target frequency. Use standard calendar-aligned dates or the source_freq=... parameter for explicit control.
-======= 61 failed, 59 passed, 2 skipped, 71 warnings in 79.54s (0:01:19) =======
+======== 61 failed, 59 passed, 2 skipped, 71 warnings in 79.54s (0:01:19) ========
 PYTEST_EXIT=1
