@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Investigated the known `sse3` crash (`RuntimeError: unknown feature flag: 'sse3'` on `import polars` / `from aggdisagg import TemporalAligner`). No code bug found; sse3 crash is environment-specific (Polars import-time CPU-feature check when CPUID is skipped or the installed wheel/runtime is mismatched). Not reproduced on an x86_64 host with SSE3 present; no library code or version change.
+- Made the previously red full `pytest --cov=aggdisagg` suite portable and clean: `tests/test_basic.py` no longer depends on hard-coded `/Users/dev/.../freq-test-files` or `/Users/dev/.../aggdisagg/pyproject.toml` paths (bundled `tests/data/freq-test-files/` fixtures + repo-relative `pyproject.toml`). `test_robust_100_scenarios` now compares aggregate *values* rather than raveling the 1.10 dated frame (date ordinals mixed with `y`).
 
 ## [1.11.0] - 2026-07-09
 

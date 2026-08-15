@@ -49,12 +49,23 @@ and would not remove `+sse3` from official x86-64 wheels.
   + matching wheel, avoid mixed `polars` / `polars-lts-cpu` versions, or
   `polars[rtcompat]` for genuine pre-AVX2 x86 hosts (that is the *warning*
   path, not the unknown-flag crash).
-- **Previously-passing methods:** `uv run pytest --cov=aggdisagg` collected
-  coverage (76% total; core 73%). In-repo Issue 1 / Issue 2 / C3–C5 / C8 / C10
-  regressions and the messy-data method matrix did not introduce new library
-  failures. Denton / Denton-Cholette / Chow-Lin family still run on the
-  TemporalAligner path.
-- **No speculative core.py / methods.py / pin change** was made.
+- **Full-suite reds (iteration-2 follow-up):** the previous pass only
+  documented leftover pytest failures. Those were **test portability / stale
+  API assertions**, not library regressions:
+  - Eighteen `test_basic.py` cases (plus two that already skipped) hard-coded
+    `/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/...` and
+    one `/Users/dev/Documents/GitHub/aggdisagg/pyproject.toml`. Loader now
+    prefers bundled `tests/data/freq-test-files/` (synthetic signal CSVs with
+    the same schema / spans the calendar tests need) and repo-relative
+    `pyproject.toml`. Tight GLS 0.80–0.98 coverage bounds still apply only
+    when the original developer corpus is present; bundled fixtures assert
+    non-degenerate ordered bands.
+  - `test_robust_100_scenarios` compared `aggregate(...).to_numpy().ravel()`
+    to `y`, mixing 1.10 date ordinals with values (0/100). It now selects the
+    value column.
+- **Previously-passing methods:** Denton / Denton-Cholette / Chow-Lin family
+  still run on the TemporalAligner path. No speculative `core.py` /
+  `methods.py` / pin change for sse3.
 
 ## 3. Known Limitations
 
@@ -66,15 +77,13 @@ and would not remove `+sse3` from official x86-64 wheels.
   very irregular or single-point input still falls back.
 - `methods.py` `Denton` / `ChowLin` remain Uniform stubs; live Denton /
   Chow-Lin is `TemporalAligner` in `core.py`.
-- Leftover pytest reds on this checkout are **not** library regressions:
-  - ~18 `test_basic.py` cases still hard-code
-    `/Users/dev/Documents/GitHub/scrap-testing-delme/freq-test-files/...`
-    (and one `/Users/dev/Documents/GitHub/aggdisagg/pyproject.toml`) and fail
-    with `FileNotFoundError` here. Two sibling tests already `pytest.skip` on
-    the same missing tree.
-  - `test_robust_100_scenarios` still ravel()s the 1.10 dated aggregate frame
-    and compares date ordinals to values (C6: stale test vs API, not a
-    numeric expander/Denton bug).
+- Bundled `tests/data/freq-test-files/` are schema-compatible stand-ins, not
+  the original developer-machine corpus. Empirical GLS coverage multipliers
+  in `core.py` were fitted on that corpus; do not treat bundled-fixture
+  coverage rates as a recalibration.
+- `test_robust_100_scenarios` is the slowest case (large n × bootstrap ×
+  methods). The date-column ravel bug is fixed; the 100-scenario loop plus
+  the n=200 stress case passed on this host.
 - The sse3 crash remains possible on hosts where Polars skips CPUID or the
   installed runtime's `BUILD_FEATURE_FLAGS` do not match the checker. That is
   a Polars/environment issue; do not “fix” it by rewriting Denton or pinning
@@ -86,7 +95,10 @@ and would not remove `+sse3` from official x86-64 wheels.
   `_apply_denton`, `_prepare_data`, `fit_transform`, `disaggregate_columns`)
 - `docs/sse3-root-cause-analysis.md` — Polars unknown-flag vs missing-feature
 - `ROOT_CAUSE_ANALYSIS.md` / `BUGFIX_REPORT_2026-08.md` — C3/C4/C5/C8/C10
-- `tests/test_basic.py`, `tests/data/` — portable fiscal / Denton fixtures
+- `tests/test_basic.py`, `tests/data/`, `tests/data/freq-test-files/` —
+  portable fiscal / Denton / calendar fixtures
+- `tests/test_simulation.py` — `test_robust_100_scenarios` value-column
+  roundtrip
 - `SESSION_HANDOFF_2026-07.md` — prior Issue 1 / Issue 2 context
 
 ## Handoff Tips for Future Bugs
@@ -102,18 +114,21 @@ and would not remove `+sse3` from official x86-64 wheels.
 4. Keep the sum-constraint tests sacred. Prefer CSVs + tolerances in
    `tests/test_basic.py` over hardcoded reference forcing in core.
 5. Do not bump version or publish to PyPI for documentation-only passes.
+6. Point `AGGDISAGG_FREQ_TEST_DIR` at the original freq-test-files tree to
+   re-enable the tight GLS 0.80–0.98 coverage bounds.
 
 ## Quick Commands
 
 ```bash
-# Full suite (this checkout; leftover FileNotFound reds are missing fixtures)
+# Full suite
 uv run pytest --cov=aggdisagg
 
-# In-repo fiscal / Denton / C-regression slice
+# In-repo fiscal / Denton / C-regression + portable calendar slice
 uv run pytest tests/test_basic.py::test_issue1_fiscal_quarter_expansion \
   tests/test_basic.py::test_issue2_denton_cholette_toy \
   tests/test_basic.py::test_c3_nat_in_real_quarterly_keeps_lengths_aligned_with_n_low \
   tests/test_basic.py::test_c10_denton_p_uses_variable_high_lengths_on_real_monthly \
+  tests/test_basic.py::test_general_calendar_variable_ratios \
   --no-cov
 
 # Confirm Polars import + CPU flags on a suspect host

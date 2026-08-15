@@ -837,9 +837,19 @@ def test_robust_100_scenarios():
 
             # Aggregate roundtrip
             back = aligner.aggregate(high, freq="1y")
-            # back may have different column name; check approx
+            # back may have a date column (1.10+ default dated frame); compare values only
             if len(back) == n_low:
-                back_vals = back.to_numpy().ravel()[:n_low]
+                if hasattr(back, "columns"):
+                    skip = {"date", "time", "datetime"}
+                    value_cols = [c for c in back.columns if str(c).lower() not in skip]
+                    if value_cols:
+                        col = value_cols[0]
+                        back_vals = back[col].to_numpy() if hasattr(back[col], "to_numpy") else np.asarray(back[col])
+                    else:
+                        back_vals = back.to_numpy().ravel()
+                else:
+                    back_vals = np.asarray(back).ravel()
+                back_vals = np.asarray(back_vals, dtype=float)[:n_low]
                 assert np.allclose(back_vals, y, atol=1.0)  # tolerance for some methods
 
             # Uncertainty
