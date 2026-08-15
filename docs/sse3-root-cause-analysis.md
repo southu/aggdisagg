@@ -1,5 +1,14 @@
 # SSE3 `RuntimeError` on `import polars` — root-cause analysis
 
+## Classification (unambiguous)
+
+**(a)** This is purely an **environment/CPU issue** on the user's machine.
+Polars' behaviour for every release admitted by `polars>=1.0.0` is
+expected/by-design and is not something aggdisagg's pinning caused.
+
+Supporting citation:
+<https://github.com/pola-rs/polars/issues/15404>
+
 ## Pinned Polars version (from `pyproject.toml`)
 
 aggdisagg does not pin an exact Polars release. The sole constraint, quoted verbatim from
